@@ -1,4 +1,4 @@
-# OwnVst3 C# Wrapper
+# OwnVst3 CSharp Wrapper
 
 This library enables loading and managing VST3 plugins in C# applications using the native OwnVst3 wrapper DLL.
 
