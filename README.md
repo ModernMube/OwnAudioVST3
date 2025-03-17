@@ -1,4 +1,4 @@
-# OwnVst3 C# Wrapper
+# OwnVst3 CSharp Wrapper
 
 This library enables loading and managing VST3 plugins in C# applications using the native OwnVst3 wrapper DLL.
 
@@ -17,7 +17,7 @@ This library enables loading and managing VST3 plugins in C# applications using 
 
 ## Installation
 
-1. Download or build the `ownvst3.dll` or `libownvst3.dylib` or `libownvst3.so` file
+1. [Download or build the `ownvst3.dll` or `libownvst3.dylib` or `libownvst3.so` file.](https://github.com/ModernMube/OwnVST3/releases)
 2. Add the `OwnVst3Wrapper.cs` file to your project
 3. Place the DLL in the same directory as your application executable, or provide its full path when using
 
