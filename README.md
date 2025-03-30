@@ -168,3 +168,13 @@ The OwnVst3Wrapper throws detailed exceptions in the following cases:
 - EntryPointNotFoundException: A required function was not found in the DLL
 - ArgumentOutOfRangeException: Invalid parameter index
 - ObjectDisposedException: Attempt to use an already disposed wrapper instance
+
+## Support My Work
+
+If you find this project helpful, consider buying me a coffee!
+
+<a href="https://www.buymeacoffee.com/ModernMube" 
+    target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/arial-yellow.png" 
+    alt="Buy Me A Coffee" 
+    style="height: 60px !important;width: 217px !important;" >
+ </a>
