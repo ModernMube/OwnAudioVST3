@@ -1,3 +1,9 @@
+<a href="https://www.buymeacoffee.com/ModernMube">
+  <img src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffe-yellow" alt="Buy Me a Coffe">
+</a>
+
+ <img src="Ownaudiologo.png" alt="Logó" width="600"/>
+
 # OwnVst3 CSharp Wrapper
 
 This library enables loading and managing VST3 plugins in C# applications using the native OwnVst3 wrapper DLL.
