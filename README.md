@@ -1,8 +1,10 @@
-<a href="https://www.buymeacoffee.com/ModernMube">
-  <img src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffe-yellow" alt="Buy Me a Coffe">
-</a>
+<div align="center">
+  <img src="Ownaudiologo.png" alt="Logó" width="600"/>
+</div>
 
- <img src="Ownaudiologo.png" alt="Logó" width="600"/>
+<a href="https://www.buymeacoffee.com/ModernMube">
+  <img src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffe-orange" alt="Buy Me a Coffe">
+</a>
 
 # OwnVst3 CSharp Wrapper
 
