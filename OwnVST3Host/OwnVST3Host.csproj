@@ -7,7 +7,7 @@
 
     <!-- NuGet csomagolási információk -->
     <PackageId>OwnVst3Host</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.1.0</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
     <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins</Description>
