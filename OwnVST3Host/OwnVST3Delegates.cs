@@ -15,6 +15,7 @@ namespace OwnVST3Host
         private delegate bool VST3Plugin_CreateEditorDelegate(IntPtr handle, IntPtr windowHandle);
         private delegate void VST3Plugin_CloseEditorDelegate(IntPtr handle);
         private delegate void VST3Plugin_ResizeEditorDelegate(IntPtr handle, int width, int height);
+        private delegate bool VST3Plugin_GetEditorSizeDelegate(IntPtr handle, out int width, out int height);
         private delegate int VST3Plugin_GetParameterCountDelegate(IntPtr handle);
         private delegate bool VST3Plugin_GetParameterAtDelegate(IntPtr handle, int index, ref VST3ParameterC parameter);
         private delegate bool VST3Plugin_SetParameterDelegate(IntPtr handle, int paramId, double value);
@@ -42,6 +43,7 @@ namespace OwnVST3Host
             _createEditorFunc = GetDelegate<VST3Plugin_CreateEditorDelegate>("VST3Plugin_CreateEditor");
             _closeEditorFunc = GetDelegate<VST3Plugin_CloseEditorDelegate>("VST3Plugin_CloseEditor");
             _resizeEditorFunc = GetDelegate<VST3Plugin_ResizeEditorDelegate>("VST3Plugin_ResizeEditor");
+            _getEditorSizeFunc = GetDelegate<VST3Plugin_GetEditorSizeDelegate>("VST3Plugin_GetEditorSize");
             _getParameterCountFunc = GetDelegate<VST3Plugin_GetParameterCountDelegate>("VST3Plugin_GetParameterCount");
             _getParameterAtFunc = GetDelegate<VST3Plugin_GetParameterAtDelegate>("VST3Plugin_GetParameterAt");
             _setParameterFunc = GetDelegate<VST3Plugin_SetParameterDelegate>("VST3Plugin_SetParameter");

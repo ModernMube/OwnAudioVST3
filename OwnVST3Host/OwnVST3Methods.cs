@@ -53,6 +53,31 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Gets the plugin editor's preferred size
+        /// </summary>
+        /// <param name="width">Output: editor width</param>
+        /// <param name="height">Output: editor height</param>
+        /// <returns>True if successful</returns>
+        public bool GetEditorSize(out int width, out int height)
+        {
+            CheckDisposed();
+            return _getEditorSizeFunc(_pluginHandle, out width, out height);
+        }
+
+        /// <summary>
+        /// Gets the plugin editor's preferred size as an EditorSize struct
+        /// </summary>
+        /// <returns>EditorSize struct with Width and Height, or null if failed</returns>
+        public EditorSize? GetEditorSize()
+        {
+            if (GetEditorSize(out int width, out int height))
+            {
+                return new EditorSize(width, height);
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Returns the number of parameters in the plugin
         /// </summary>
         /// <returns>Parameter count</returns>

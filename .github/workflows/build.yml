@@ -1,0 +1,256 @@
+name: Build Cross-Platform
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual trigger
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  # ============================================
+  # Build Native C++ Library (OwnVST3 submodule)
+  # ============================================
+  build-native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x64
+          - os: windows-latest
+            arch: x64
+            rid: win-x64
+            lib_name: ownvst3.dll
+            cmake_args: -A x64
+
+          # Windows x86
+          - os: windows-latest
+            arch: x86
+            rid: win-x86
+            lib_name: ownvst3.dll
+            cmake_args: -A Win32
+
+          # Windows ARM64
+          - os: windows-latest
+            arch: arm64
+            rid: win-arm64
+            lib_name: ownvst3.dll
+            cmake_args: -A ARM64
+
+          # macOS Universal (x64 + ARM64)
+          - os: macos-latest
+            arch: universal
+            rid: osx-universal
+            lib_name: libownvst3.dylib
+            cmake_args: -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+
+          # Linux x64
+          - os: ubuntu-latest
+            arch: x64
+            rid: linux-x64
+            lib_name: libownvst3.so
+            cmake_args: ""
+
+          # Linux ARM64 (cross-compile)
+          - os: ubuntu-latest
+            arch: arm64
+            rid: linux-arm64
+            lib_name: libownvst3.so
+            cmake_args: -DCMAKE_SYSTEM_PROCESSOR=aarch64
+
+    runs-on: ${{ matrix.os }}
+    name: Native - ${{ matrix.rid }}
+
+    steps:
+      - name: Checkout repository with submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Install dependencies for Linux
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      # Install cross-compile tools for Linux ARM64
+      - name: Install Linux ARM64 cross-compiler
+        if: matrix.rid == 'linux-arm64'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CXX=aarch64-linux-gnu-g++" >> $GITHUB_ENV
+
+      # Configure CMake (OwnVST3 is now a submodule in the root)
+      - name: Configure CMake
+        working-directory: OwnVST3
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.cmake_args }}
+
+      # Build
+      - name: Build
+        working-directory: OwnVST3
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
+
+      # Find and prepare artifact
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $lib = Get-ChildItem -Path "OwnVST3/build" -Recurse -Filter "${{ matrix.lib_name }}" | Select-Object -First 1
+          if ($lib) {
+            New-Item -ItemType Directory -Force -Path "artifacts/${{ matrix.rid }}"
+            Copy-Item $lib.FullName "artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}"
+          } else {
+            Write-Error "Library not found!"
+            exit 1
+          }
+
+      - name: Prepare artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p artifacts/${{ matrix.rid }}
+          find OwnVST3/build -name "${{ matrix.lib_name }}" -exec cp {} artifacts/${{ matrix.rid }}/ \;
+
+      # Upload artifact
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.rid }}
+          path: artifacts/${{ matrix.rid }}/
+          retention-days: 30
+
+  # ============================================
+  # Build C# Project (root of this repo)
+  # ============================================
+  build-csharp:
+    needs: build-native
+    runs-on: ubuntu-latest
+    name: C# Build & Package
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      # Download all native artifacts to runtimes folder
+      - name: Download Windows x64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-x64
+          path: runtimes/win-x64/native/
+
+      - name: Download Windows x86 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-x86
+          path: runtimes/win-x86/native/
+        continue-on-error: true
+
+      - name: Download Windows ARM64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-win-arm64
+          path: runtimes/win-arm64/native/
+        continue-on-error: true
+
+      - name: Download macOS native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-osx-universal
+          path: runtimes/osx/native/
+
+      - name: Download Linux x64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: runtimes/linux-x64/native/
+
+      - name: Download Linux ARM64 native
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-arm64
+          path: runtimes/linux-arm64/native/
+        continue-on-error: true
+
+      # Copy macOS universal to both arch folders
+      - name: Setup macOS runtime folders
+        run: |
+          mkdir -p runtimes/osx-x64/native/
+          mkdir -p runtimes/osx-arm64/native/
+          cp runtimes/osx/native/* runtimes/osx-x64/native/ || true
+          cp runtimes/osx/native/* runtimes/osx-arm64/native/ || true
+
+      # Build C# project (from root)
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      # Pack NuGet (optional)
+      - name: Pack NuGet
+        working-directory: OwnVST3Host
+        run: dotnet pack --configuration Release --no-build -o ../packages
+        continue-on-error: true
+
+      # Upload C# build artifacts
+      - name: Upload C# artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OwnVST3Sharp-Release
+          path: |
+            bin/Release/
+            OwnVST3Host/bin/Release/
+            packages/
+          retention-days: 30
+
+  # ============================================
+  # Create Release (on tag push)
+  # ============================================
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-native, build-csharp]
+    runs-on: ubuntu-latest
+    name: Create Release
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - name: Create release archives
+        run: |
+          cd release-artifacts
+
+          # Create native libraries archive
+          mkdir -p native-all/runtimes
+          for dir in native-*/; do
+            rid=$(echo $dir | sed 's/native-//' | sed 's/\///')
+            mkdir -p "native-all/runtimes/$rid/native"
+            cp -r "$dir"* "native-all/runtimes/$rid/native/" || true
+          done
+          cd native-all && zip -r ../OwnVST3-native-all.zip . && cd ..
+
+          # Zip C# release
+          cd OwnVST3Sharp-Release && zip -r ../OwnVST3Sharp-Release.zip . && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release-artifacts/OwnVST3-native-all.zip
+            release-artifacts/OwnVST3Sharp-Release.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
