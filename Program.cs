@@ -1,6 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Runtime.InteropServices;
 using OwnVST3Host;
 
 namespace OwnVst3SampleApp
@@ -13,26 +13,32 @@ namespace OwnVst3SampleApp
             Console.WriteLine("OwnVst3 C# Sample Program");
             Console.WriteLine("------------------------");
 
-            // Path to the dll - ensure this is the correct path in your runtime environment
-            string dllPath = @"Library\ownvst3.dll";
-
-            // Check if the path exists
-            if (!File.Exists(dllPath))
-            {
-                Console.WriteLine($"ERROR: DLL not found: {dllPath}");
-                Console.WriteLine("Please check the path or place the DLL in the application directory.");
-                return;
-            }
-
             try
             {
-                // Create VST3 plugin wrapper instance
-                using (OwnVst3Wrapper vst = new OwnVst3Wrapper(dllPath))
+                // Display detected platform info
+                Console.WriteLine($"Runtime Identifier: {OwnVst3Wrapper.GetRuntimeIdentifier()}");
+                Console.WriteLine($"Native Library: {OwnVst3Wrapper.GetNativeLibraryName()}");
+                Console.WriteLine();
+
+                // Display VST3 directory information
+                Console.WriteLine(OwnVst3Wrapper.GetVst3DirectoriesInfo());
+                Console.WriteLine();
+
+                // Create VST3 plugin wrapper instance with automatic platform detection
+                // The library is loaded from: runtimes/{rid}/native/
+                using (OwnVst3Wrapper vst = new OwnVst3Wrapper())
                 {
                     Console.WriteLine("VST3 wrapper successfully initialized.");
 
-                    // Load a VST3 plugin - replace the path with your VST3 plugin path
-                    string pluginPath = @"C:\VST3 PLugin\vstplugin.vst3";
+                    // Get plugin path - either from command line, auto-discovery, or user input
+                    string? pluginPath = GetPluginPath(args);
+
+                    if (string.IsNullOrEmpty(pluginPath))
+                    {
+                        Console.WriteLine("No VST3 plugin specified or found. Exiting.");
+                        return;
+                    }
+
                     Console.WriteLine($"Loading VST3 plugin: {pluginPath}");
 
                     if (vst.LoadPlugin(pluginPath))
@@ -175,6 +181,71 @@ namespace OwnVst3SampleApp
 
             Console.WriteLine("\nPress any key to exit...");
             Console.ReadKey();
+        }
+
+        /// <summary>
+        /// Gets the VST3 plugin path from command line args, auto-discovery, or user input.
+        /// </summary>
+        static string? GetPluginPath(string[] args)
+        {
+            // 1. Check command line arguments
+            if (args.Length > 0 && !string.IsNullOrEmpty(args[0]))
+            {
+                string argPath = args[0];
+                if (File.Exists(argPath) || Directory.Exists(argPath))
+                {
+                    return argPath;
+                }
+                Console.WriteLine($"Warning: Specified path not found: {argPath}");
+            }
+
+            // 2. Try auto-discovery
+            Console.WriteLine("Searching for VST3 plugins...");
+            var plugins = OwnVst3Wrapper.FindVst3Plugins();
+
+            if (plugins.Count > 0)
+            {
+                Console.WriteLine($"\nFound {plugins.Count} VST3 plugin(s):");
+                for (int i = 0; i < Math.Min(plugins.Count, 20); i++)
+                {
+                    Console.WriteLine($"  [{i + 1}] {Path.GetFileName(plugins[i])}");
+                    Console.WriteLine($"      {plugins[i]}");
+                }
+
+                if (plugins.Count > 20)
+                {
+                    Console.WriteLine($"  ... and {plugins.Count - 20} more");
+                }
+
+                Console.WriteLine();
+                Console.Write("Enter plugin number to load (or 'q' to quit): ");
+                string input = Console.ReadLine() ?? "";
+
+                if (input.ToLower() == "q" || string.IsNullOrWhiteSpace(input))
+                {
+                    return null;
+                }
+
+                if (int.TryParse(input, out int selection) && selection >= 1 && selection <= plugins.Count)
+                {
+                    return plugins[selection - 1];
+                }
+
+                Console.WriteLine("Invalid selection.");
+                return null;
+            }
+
+            // 3. No plugins found - ask for manual path
+            Console.WriteLine("No VST3 plugins found in default directories.");
+            Console.Write("Enter full path to a VST3 plugin (or press Enter to quit): ");
+            string manualPath = Console.ReadLine() ?? "";
+
+            if (!string.IsNullOrWhiteSpace(manualPath) && (File.Exists(manualPath) || Directory.Exists(manualPath)))
+            {
+                return manualPath;
+            }
+
+            return null;
         }
     }
 }

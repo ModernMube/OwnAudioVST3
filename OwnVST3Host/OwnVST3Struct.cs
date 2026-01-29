@@ -40,4 +40,19 @@ namespace OwnVST3Host
 
         #endregion
     }
+
+    /// <summary>
+    /// Represents the size of the plugin editor
+    /// </summary>
+    public struct EditorSize
+    {
+        public int Width { get; set; }
+        public int Height { get; set; }
+
+        public EditorSize(int width, int height)
+        {
+            Width = width;
+            Height = height;
+        }
+    }
 }
