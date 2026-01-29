@@ -40,7 +40,7 @@ namespace OwnVST3Host
         private VST3Plugin_IsEffectDelegate _isEffectFunc;
         private VST3Plugin_GetNameDelegate _getNameFunc;
         private VST3Plugin_GetVendorDelegate _getVendorFunc;
-        private VST3Plugin_GetVersionDelegate _getVersionFunc;
+        //private VST3Plugin_GetVersionDelegate _getVersionFunc;
         private VST3Plugin_GetPluginInfoDelegate _getPluginInfoFunc;
         private VST3Plugin_ClearStringCacheDelegate _clearStringCacheFunc;
 
