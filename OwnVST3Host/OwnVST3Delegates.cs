@@ -27,7 +27,7 @@ namespace OwnVST3Host
         private delegate bool VST3Plugin_IsEffectDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetNameDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetVendorDelegate(IntPtr handle);
-        private delegate IntPtr VST3Plugin_GetVersionDelegate(IntPtr handle);
+        //private delegate IntPtr VST3Plugin_GetVersionDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetPluginInfoDelegate(IntPtr handle);
         private delegate void VST3Plugin_ClearStringCacheDelegate();
 
@@ -55,7 +55,7 @@ namespace OwnVST3Host
             _isEffectFunc = GetDelegate<VST3Plugin_IsEffectDelegate>("VST3Plugin_IsEffect");
             _getNameFunc = GetDelegate<VST3Plugin_GetNameDelegate>("VST3Plugin_GetName");
             _getVendorFunc = GetDelegate<VST3Plugin_GetVendorDelegate>("VST3Plugin_GetVendor");
-            _getVersionFunc = GetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion");
+            //_getVersionFunc = GetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion");
             _getPluginInfoFunc = GetDelegate<VST3Plugin_GetPluginInfoDelegate>("VST3Plugin_GetPluginInfo");
             _clearStringCacheFunc = GetDelegate<VST3Plugin_ClearStringCacheDelegate>("VST3Plugin_ClearStringCache");
         }

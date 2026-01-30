@@ -31,7 +31,8 @@ namespace OwnVst3SampleApp
                     Console.WriteLine("VST3 wrapper successfully initialized.");
 
                     // Get plugin path - either from command line, auto-discovery, or user input
-                    string? pluginPath = GetPluginPath(args);
+                    //string? pluginPath = GetPluginPath(args);
+                    string? pluginPath = @"path/vstplugin.vst3";
 
                     if (string.IsNullOrEmpty(pluginPath))
                     {
