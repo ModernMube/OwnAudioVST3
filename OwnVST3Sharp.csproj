@@ -7,9 +7,11 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <!-- Exclude OwnVST3Host folder - it's compiled as a separate project -->
+  <!-- Exclude subproject folders - they are compiled as separate projects -->
   <ItemGroup>
     <Compile Remove="OwnVST3Host\**" />
+    <Compile Remove="OwnVST3Editor\**" />
+    <Compile Remove="OwnVST3EditorDemo\**" />
   </ItemGroup>
 
   <ItemGroup>
