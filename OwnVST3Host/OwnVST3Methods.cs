@@ -284,11 +284,13 @@ namespace OwnVST3Host
         /// <summary>
         /// Returns the plugin version
         /// </summary>
-        public string Version
+        public string? Version
         {
            get
            {
                CheckDisposed();
+               if (_getVersionFunc == null)
+                   return null; // Function not available in this version of the native library
                IntPtr versionPtr = _getVersionFunc(_pluginHandle);
                return Marshal.PtrToStringAnsi(versionPtr);
            }
