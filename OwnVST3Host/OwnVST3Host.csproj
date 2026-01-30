@@ -7,7 +7,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- NuGet packaging information -->
-    <PackageId>OwnVst3Host</PackageId>
+    <PackageId>OwnAudioVst</PackageId>
     <Version>1.3.0</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
@@ -15,7 +15,7 @@
     <PackageTags>vst;vst3;audio;plugin;wrapper;editor;avalonia;cross-platform</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/ModernMube/OwnVST3Sharp</RepositoryUrl>
+    <RepositoryUrl>https://github.com/ModernMube/OwnAudioVST3</RepositoryUrl>
     <PackageIcon>icon.png</PackageIcon>
   </PropertyGroup>
 
