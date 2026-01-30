@@ -1,7 +1,7 @@
-# OwnVST3Sharp
+# OwnAudioVST3
 
 <p align="center">
-  <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="400"/>
+  <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="600"/>
 </p>
 
 A cross-platform C# wrapper for VST3 plugins with built-in visual editor support using Avalonia UI.
@@ -117,6 +117,16 @@ dotnet run --project OwnVST3EditorDemo
 - **OwnVST3Host** - Main library with VST3 wrapper and editor support
 - **OwnVST3EditorDemo** - Example application demonstrating usage
 - **OwnVST3** - Native C++ library (submodule)
+
+## Support My Work
+
+If you find this project helpful, consider buying me a coffee!
+
+<a href="https://www.buymeacoffee.com/ModernMube" 
+    target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/arial-yellow.png" 
+    alt="Buy Me A Coffee" 
+    style="height: 60px !important;width: 217px !important;" >
+ </a>
 
 ## License
 
