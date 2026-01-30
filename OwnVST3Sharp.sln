@@ -11,8 +11,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3Editor", "OwnVST3Edi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3EditorDemo", "OwnVST3EditorDemo\OwnVST3EditorDemo.csproj", "{B2C3D4E5-2345-6789-ABCD-EF0123456789}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3EtoDemo", "OwnVST3EtoDemo\OwnVST3EtoDemo.csproj", "{8B84A672-72D8-4B4A-BDD2-400D23731792}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -71,18 +69,6 @@ Global
 		{B2C3D4E5-2345-6789-ABCD-EF0123456789}.Release|x64.Build.0 = Release|Any CPU
 		{B2C3D4E5-2345-6789-ABCD-EF0123456789}.Release|x86.ActiveCfg = Release|Any CPU
 		{B2C3D4E5-2345-6789-ABCD-EF0123456789}.Release|x86.Build.0 = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|x64.Build.0 = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Debug|x86.Build.0 = Debug|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|Any CPU.Build.0 = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|x64.ActiveCfg = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|x64.Build.0 = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|x86.ActiveCfg = Release|Any CPU
-		{8B84A672-72D8-4B4A-BDD2-400D23731792}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
