@@ -1,7 +1,7 @@
 # OwnVST3Sharp
 
 <p align="center">
-  <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="200"/>
+  <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="400"/>
 </p>
 
 A cross-platform C# wrapper for VST3 plugins with built-in visual editor support using Avalonia UI.
