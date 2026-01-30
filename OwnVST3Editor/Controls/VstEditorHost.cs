@@ -85,7 +85,6 @@ namespace OwnVST3Editor.Controls
             if (_plugin != null)
             {
                 UpdateSize();
-                Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
             }
         }
 
@@ -98,9 +97,16 @@ namespace OwnVST3Editor.Controls
 
         protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
         {
-            // Store parent handle for editor attachment
-            _embeddedHandle = parent.Handle;
-            return base.CreateNativeControlCore(parent);
+            // Create the native control (child window)
+            var handle = base.CreateNativeControlCore(parent);
+
+            // Store the native control handle for editor attachment
+            _embeddedHandle = handle?.Handle ?? parent.Handle;
+
+            // Attach editor after native control is created
+            Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
+
+            return handle;
         }
 
         protected override void DestroyNativeControlCore(IPlatformHandle control)
@@ -125,15 +131,22 @@ namespace OwnVST3Editor.Controls
                     return;
                 }
 
-                // Get the parent window handle
-                var topLevel = TopLevel.GetTopLevel(this);
-                if (topLevel == null)
+                // Use the embedded native control handle if available
+                IntPtr windowHandle = _embeddedHandle;
+
+                // Fallback to top-level window handle if embedded handle not yet created
+                if (windowHandle == IntPtr.Zero)
                 {
-                    OnEditorError("Control is not attached to a window");
-                    return;
+                    var topLevel = TopLevel.GetTopLevel(this);
+                    if (topLevel == null)
+                    {
+                        OnEditorError("Control is not attached to a window");
+                        return;
+                    }
+
+                    windowHandle = NativeWindowHandle.GetHandle(topLevel);
                 }
 
-                IntPtr windowHandle = NativeWindowHandle.GetHandle(topLevel);
                 if (windowHandle == IntPtr.Zero)
                 {
                     OnEditorError("Failed to get native window handle");
