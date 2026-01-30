@@ -1,0 +1,3 @@
+[submodule "OwnVST3"]
+	path = OwnVST3
+	url = https://github.com/ModernMube/OwnVST3.git
