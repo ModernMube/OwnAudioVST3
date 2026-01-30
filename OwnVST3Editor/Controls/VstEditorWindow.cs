@@ -15,13 +15,13 @@ namespace OwnVST3Editor.Controls
     public class VstEditorWindow : Window
     {
         private readonly OwnVst3Wrapper _plugin;
-        private bool _editorCreated;
+        private readonly VstEditorHost _editorHost;
         private bool _isClosing;
 
         /// <summary>
         /// Gets whether the VST3 editor is currently active
         /// </summary>
-        public bool IsEditorActive => _editorCreated;
+        public bool IsEditorActive => _editorHost.IsEditorActive;
 
         /// <summary>
         /// Fired when the editor is successfully attached
@@ -45,6 +45,17 @@ namespace OwnVST3Editor.Controls
         public VstEditorWindow(OwnVst3Wrapper plugin)
         {
             _plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
+
+            // Create the editor host control
+            _editorHost = new VstEditorHost
+            {
+                Plugin = _plugin
+            };
+
+            // Wire up events
+            _editorHost.EditorAttached += (s, e) => EditorAttached?.Invoke(this, e);
+            _editorHost.EditorDetached += (s, e) => EditorDetached?.Invoke(this, e);
+            _editorHost.EditorError += (s, e) => EditorError?.Invoke(this, e);
 
             InitializeWindow();
         }
@@ -74,6 +85,10 @@ namespace OwnVST3Editor.Controls
                 Height = height;
                 MinWidth = width;
                 MinHeight = height;
+
+                // Update editor host size
+                _editorHost.Width = width;
+                _editorHost.Height = height;
             }
             else
             {
@@ -92,14 +107,9 @@ namespace OwnVST3Editor.Controls
             {
                 Title = "VST3 Editor";
             }
-        }
 
-        protected override void OnOpened(EventArgs e)
-        {
-            base.OnOpened(e);
-
-            // Attach editor after window is fully opened
-            Dispatcher.UIThread.Post(() => AttachEditor(), DispatcherPriority.Loaded);
+            // Set the editor host as window content
+            Content = _editorHost;
         }
 
         protected override void OnClosing(WindowClosingEventArgs e)
@@ -107,7 +117,7 @@ namespace OwnVST3Editor.Controls
             if (!_isClosing)
             {
                 _isClosing = true;
-                DetachEditor();
+                _editorHost.DetachEditor();
             }
 
             base.OnClosing(e);
@@ -115,7 +125,7 @@ namespace OwnVST3Editor.Controls
 
         protected override void OnClosed(EventArgs e)
         {
-            DetachEditor();
+            _editorHost.DetachEditor();
             base.OnClosed(e);
         }
 
@@ -124,43 +134,7 @@ namespace OwnVST3Editor.Controls
         /// </summary>
         public void AttachEditor()
         {
-            if (_editorCreated)
-                return;
-
-            try
-            {
-                if (!NativeWindowHandle.IsSupported)
-                {
-                    OnEditorError("Current platform is not supported for VST3 editor embedding");
-                    return;
-                }
-
-                IntPtr windowHandle = NativeWindowHandle.GetHandle(this);
-                if (windowHandle == IntPtr.Zero)
-                {
-                    OnEditorError("Failed to get native window handle");
-                    return;
-                }
-
-                bool success = _plugin.CreateEditor(windowHandle);
-                if (success)
-                {
-                    _editorCreated = true;
-
-                    // Update window size to match editor
-                    UpdateWindowSize();
-
-                    EditorAttached?.Invoke(this, EventArgs.Empty);
-                }
-                else
-                {
-                    OnEditorError("Failed to create VST3 editor view");
-                }
-            }
-            catch (Exception ex)
-            {
-                OnEditorError($"Error attaching editor: {ex.Message}");
-            }
+            _editorHost.AttachEditor();
         }
 
         /// <summary>
@@ -168,19 +142,7 @@ namespace OwnVST3Editor.Controls
         /// </summary>
         public void DetachEditor()
         {
-            if (!_editorCreated)
-                return;
-
-            try
-            {
-                _plugin.CloseEditor();
-                _editorCreated = false;
-                EditorDetached?.Invoke(this, EventArgs.Empty);
-            }
-            catch (Exception ex)
-            {
-                OnEditorError($"Error detaching editor: {ex.Message}");
-            }
+            _editorHost.DetachEditor();
         }
 
         /// <summary>
@@ -188,6 +150,8 @@ namespace OwnVST3Editor.Controls
         /// </summary>
         public void UpdateWindowSize()
         {
+            _editorHost.UpdateSize();
+
             if (_plugin.GetEditorSize(out int width, out int height))
             {
                 Width = width;
@@ -202,15 +166,7 @@ namespace OwnVST3Editor.Controls
         /// </summary>
         public void ResizeEditorToWindow()
         {
-            if (_editorCreated)
-            {
-                _plugin.ResizeEditor((int)Width, (int)Height);
-            }
-        }
-
-        private void OnEditorError(string message)
-        {
-            EditorError?.Invoke(this, new VstEditorErrorEventArgs(message));
+            _editorHost.ResizeEditor();
         }
 
         /// <summary>
