@@ -146,14 +146,23 @@ public class MainWindow : Window
 
         try
         {
-            var plugins = OwnVst3Wrapper.FindVst3Plugins();
+            // Only use x64 plugin directory on 64-bit systems to avoid architecture mismatch
+            var directories = new List<string>();
+            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string vst3Path = Path.Combine(programFiles, "Common Files", "VST3");
+            if (Directory.Exists(vst3Path))
+            {
+                directories.Add(vst3Path);
+            }
+
+            var plugins = OwnVst3Wrapper.FindVst3Plugins(directories.ToArray());
             _pluginList.ItemsSource = plugins.Select(p => new PluginItem
             {
                 Path = p,
                 Name = Path.GetFileNameWithoutExtension(p)
             }).ToList();
 
-            _statusText.Text = $"Found {plugins.Count} VST3 plugin(s)";
+            _statusText.Text = $"Found {plugins.Count} VST3 plugin(s) in x64 directory";
         }
         catch (Exception ex)
         {
@@ -181,13 +190,25 @@ public class MainWindow : Window
             _currentPlugin = new OwnVst3Wrapper();
             if (_currentPlugin.LoadPlugin(item.Path))
             {
+                // Check if plugin was actually loaded (name should not be empty)
+                string? pluginName = _currentPlugin.Name;
+                if (string.IsNullOrEmpty(pluginName))
+                {
+                    _statusText.Text = "Plugin load failed - architecture mismatch? (x86 vs x64)";
+                    _openEditorButton.IsEnabled = false;
+                    return;
+                }
+
                 _currentPlugin.Initialize(44100, 512);
 
                 // Update info panel
                 UpdatePluginInfo();
 
-                _openEditorButton.IsEnabled = _currentPlugin.HasEditor();
-                _statusText.Text = $"Loaded: {_currentPlugin.Name}";
+                bool hasEditor = _currentPlugin.HasEditor();
+                _openEditorButton.IsEnabled = hasEditor;
+                _statusText.Text = hasEditor
+                    ? $"Loaded: {pluginName}"
+                    : $"Loaded: {pluginName} (no editor available)";
             }
             else
             {

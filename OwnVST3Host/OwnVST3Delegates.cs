@@ -55,7 +55,7 @@ namespace OwnVST3Host
             _isEffectFunc = GetDelegate<VST3Plugin_IsEffectDelegate>("VST3Plugin_IsEffect");
             _getNameFunc = GetDelegate<VST3Plugin_GetNameDelegate>("VST3Plugin_GetName");
             _getVendorFunc = GetDelegate<VST3Plugin_GetVendorDelegate>("VST3Plugin_GetVendor");
-            _getVersionFunc = GetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion");
+            _getVersionFunc = TryGetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion"); // Optional - may not exist in older DLLs
             _getPluginInfoFunc = GetDelegate<VST3Plugin_GetPluginInfoDelegate>("VST3Plugin_GetPluginInfo");
             _clearStringCacheFunc = GetDelegate<VST3Plugin_ClearStringCacheDelegate>("VST3Plugin_ClearStringCache");
         }
@@ -68,6 +68,15 @@ namespace OwnVST3Host
                 throw new EntryPointNotFoundException($"Function not found: {functionName}");
             }
             return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
+        }
+
+        private T? TryGetDelegate<T>(string functionName) where T : Delegate
+        {
+            if (NativeLibrary.TryGetExport(_libraryHandle, functionName, out IntPtr funcPtr) && funcPtr != IntPtr.Zero)
+            {
+                return Marshal.GetDelegateForFunctionPointer<T>(funcPtr);
+            }
+            return null;
         }
         
         #endregion
