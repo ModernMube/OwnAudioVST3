@@ -8,7 +8,7 @@
 
     <!-- NuGet packaging information -->
     <PackageId>OwnAudioVst</PackageId>
-    <Version>1.3.2</Version>
+    <Version>1.3.3</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
     <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins. Includes cross-platform editor support using Avalonia UI.</Description>
