@@ -30,6 +30,8 @@ namespace OwnVST3Host
         private delegate IntPtr VST3Plugin_GetVersionDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetPluginInfoDelegate(IntPtr handle);
         private delegate void VST3Plugin_ClearStringCacheDelegate();
+        private delegate void VST3Plugin_ProcessIdleDelegate(IntPtr handle);
+        private delegate bool VST3Plugin_IsEditorOpenDelegate(IntPtr handle);
 
         #endregion
 
@@ -58,6 +60,8 @@ namespace OwnVST3Host
             _getVersionFunc = TryGetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion"); // Optional - may not exist in older DLLs
             _getPluginInfoFunc = GetDelegate<VST3Plugin_GetPluginInfoDelegate>("VST3Plugin_GetPluginInfo");
             _clearStringCacheFunc = GetDelegate<VST3Plugin_ClearStringCacheDelegate>("VST3Plugin_ClearStringCache");
+            _processIdleFunc = TryGetDelegate<VST3Plugin_ProcessIdleDelegate>("VST3Plugin_ProcessIdle"); // Optional - may not exist in older DLLs
+            _isEditorOpenFunc = TryGetDelegate<VST3Plugin_IsEditorOpenDelegate>("VST3Plugin_IsEditorOpen"); // Optional - may not exist in older DLLs
         }
 
         private T GetDelegate<T>(string functionName) where T : Delegate

@@ -43,6 +43,8 @@ namespace OwnVST3Host
         private VST3Plugin_GetVersionDelegate _getVersionFunc;
         private VST3Plugin_GetPluginInfoDelegate _getPluginInfoFunc;
         private VST3Plugin_ClearStringCacheDelegate _clearStringCacheFunc;
+        private VST3Plugin_ProcessIdleDelegate? _processIdleFunc;
+        private VST3Plugin_IsEditorOpenDelegate? _isEditorOpenFunc;
 
         #endregion
 

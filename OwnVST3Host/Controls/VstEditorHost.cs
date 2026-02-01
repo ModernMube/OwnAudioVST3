@@ -11,6 +11,7 @@ namespace OwnVST3Host.Controls
     /// <summary>
     /// A control that hosts a VST3 plugin editor within an Avalonia layout.
     /// Uses platform-specific native child window embedding.
+    /// Includes idle timer for proper popup menu handling on all platforms.
     /// </summary>
     public class VstEditorHost : NativeControlHost
     {
@@ -18,6 +19,7 @@ namespace OwnVST3Host.Controls
         private bool _editorCreated;
         private IntPtr _embeddedHandle;
         private bool _isAttached;
+        private DispatcherTimer? _idleTimer;
 
         /// <summary>
         /// Defines the Plugin property
@@ -157,6 +159,7 @@ namespace OwnVST3Host.Controls
                 if (success)
                 {
                     _editorCreated = true;
+                    StartIdleTimer();
                     EditorAttached?.Invoke(this, EventArgs.Empty);
                 }
                 else
@@ -180,6 +183,7 @@ namespace OwnVST3Host.Controls
 
             try
             {
+                StopIdleTimer();
                 _plugin.CloseEditor();
                 _editorCreated = false;
                 EditorDetached?.Invoke(this, EventArgs.Empty);
@@ -187,6 +191,51 @@ namespace OwnVST3Host.Controls
             catch (Exception ex)
             {
                 OnEditorError($"Error detaching editor: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Starts the idle timer for processing plugin UI events.
+        /// This is essential for proper popup menu handling when
+        /// running with a separate audio thread.
+        /// </summary>
+        private void StartIdleTimer()
+        {
+            if (_idleTimer != null) return;
+
+            _idleTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(16) // ~60fps for smooth UI
+            };
+            _idleTimer.Tick += OnIdleTimerTick;
+            _idleTimer.Start();
+        }
+
+        /// <summary>
+        /// Stops the idle timer
+        /// </summary>
+        private void StopIdleTimer()
+        {
+            if (_idleTimer != null)
+            {
+                _idleTimer.Stop();
+                _idleTimer.Tick -= OnIdleTimerTick;
+                _idleTimer = null;
+            }
+        }
+
+        /// <summary>
+        /// Called periodically to process plugin idle events
+        /// </summary>
+        private void OnIdleTimerTick(object? sender, EventArgs e)
+        {
+            try
+            {
+                _plugin?.ProcessIdle();
+            }
+            catch
+            {
+                // Ignore exceptions in idle processing
             }
         }
 
