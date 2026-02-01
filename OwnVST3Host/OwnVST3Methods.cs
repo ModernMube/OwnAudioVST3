@@ -22,14 +22,14 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Opens the plugin editor in a native window
+        /// Creates an editor view for the plugin
         /// </summary>
-        /// <param name="title">Window title (optional)</param>
+        /// <param name="windowHandle">Window handle where the editor should appear</param>
         /// <returns>True if successful</returns>
-        public bool OpenEditor(string title = "VST3 Plugin Editor")
+        public bool CreateEditor(IntPtr windowHandle)
         {
             CheckDisposed();
-            return _openEditorFunc(_pluginHandle, title);
+            return _createEditorFunc(_pluginHandle, windowHandle);
         }
 
         /// <summary>
@@ -286,14 +286,14 @@ namespace OwnVST3Host
         /// </summary>
         public string? Version
         {
-            get
-            {
-                CheckDisposed();
-                if (_getVersionFunc == null)
-                    return null; // Function not available in this version of the native library
-                IntPtr versionPtr = _getVersionFunc(_pluginHandle);
-                return Marshal.PtrToStringAnsi(versionPtr);
-            }
+           get
+           {
+               CheckDisposed();
+               if (_getVersionFunc == null)
+                   return null; // Function not available in this version of the native library
+               IntPtr versionPtr = _getVersionFunc(_pluginHandle);
+               return Marshal.PtrToStringAnsi(versionPtr);
+           }
         }
 
         /// <summary>

@@ -1,13 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Threading;
+using OwnVST3Host.Platform;
 using OwnVST3Host;
 
 namespace OwnVST3Host.Controls
 {
     /// <summary>
-    /// A standalone window for managing VST3 plugin editors.
-    /// The editor itself runs in a native window managed by the native library.
-    /// This window provides a control interface (button) to open/close the native editor.
+    /// A standalone window for displaying VST3 plugin editors.
+    /// Supports Windows, Linux (X11), and macOS platforms.
     /// </summary>
     public class VstEditorWindow : Window
     {
@@ -16,9 +19,24 @@ namespace OwnVST3Host.Controls
         private bool _isClosing;
 
         /// <summary>
-        /// Gets whether the VST3 native editor is currently open
+        /// Gets whether the VST3 editor is currently active
         /// </summary>
-        public bool IsEditorActive => _plugin?.IsEditorOpen ?? false;
+        public bool IsEditorActive => _editorHost.IsEditorActive;
+
+        /// <summary>
+        /// Fired when the editor is successfully attached
+        /// </summary>
+        public event EventHandler? EditorAttached;
+
+        /// <summary>
+        /// Fired when the editor is detached
+        /// </summary>
+        public event EventHandler? EditorDetached;
+
+        /// <summary>
+        /// Fired when an error occurs during editor operations
+        /// </summary>
+        public event EventHandler<VstEditorErrorEventArgs>? EditorError;
 
         /// <summary>
         /// Creates a new VST3 editor window
@@ -28,11 +46,16 @@ namespace OwnVST3Host.Controls
         {
             _plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
 
-            // Create the editor host control (provides button to open/close native editor)
+            // Create the editor host control
             _editorHost = new VstEditorHost
             {
                 Plugin = _plugin
             };
+
+            // Wire up events
+            _editorHost.EditorAttached += (s, e) => EditorAttached?.Invoke(this, e);
+            _editorHost.EditorDetached += (s, e) => EditorDetached?.Invoke(this, e);
+            _editorHost.EditorError += (s, e) => EditorError?.Invoke(this, e);
 
             InitializeWindow();
         }
@@ -55,21 +78,34 @@ namespace OwnVST3Host.Controls
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             SystemDecorations = SystemDecorations.Full;
 
-            // Set a reasonable default size for the control window
-            Width = 300;
-            Height = 120;
-            MinWidth = 200;
-            MinHeight = 100;
+            // Try to get editor size and set window dimensions
+            if (_plugin.GetEditorSize(out int width, out int height))
+            {
+                Width = width;
+                Height = height;
+                MinWidth = width;
+                MinHeight = height;
+
+                // Update editor host size
+                _editorHost.Width = width;
+                _editorHost.Height = height;
+            }
+            else
+            {
+                // Default size if editor size not available
+                Width = 800;
+                Height = 600;
+            }
 
             // Set title from plugin name
             try
             {
                 string? pluginName = _plugin.Name;
-                Title = string.IsNullOrEmpty(pluginName) ? "VST3 Editor Control" : $"{pluginName} - Editor Control";
+                Title = string.IsNullOrEmpty(pluginName) ? "VST3 Editor" : $"{pluginName} - Editor";
             }
             catch
             {
-                Title = "VST3 Editor Control";
+                Title = "VST3 Editor";
             }
 
             // Set the editor host as window content
@@ -81,41 +117,60 @@ namespace OwnVST3Host.Controls
             if (!_isClosing)
             {
                 _isClosing = true;
-                // Close the native editor when this control window closes
-                try
-                {
-                    if (_plugin?.IsEditorOpen == true)
-                    {
-                        _plugin.CloseEditor();
-                    }
-                }
-                catch
-                {
-                    // Ignore errors during close
-                }
+                _editorHost.DetachEditor();
             }
 
             base.OnClosing(e);
         }
 
-        /// <summary>
-        /// Opens the native VST3 editor
-        /// </summary>
-        public void OpenEditor()
+        protected override void OnClosed(EventArgs e)
         {
-            _plugin?.OpenEditor(Title);
+            _editorHost.DetachEditor();
+            base.OnClosed(e);
         }
 
         /// <summary>
-        /// Closes the native VST3 editor
+        /// Attaches the VST3 editor to this window
         /// </summary>
-        public void CloseEditor()
+        public void AttachEditor()
         {
-            _plugin?.CloseEditor();
+            _editorHost.AttachEditor();
         }
 
         /// <summary>
-        /// Static helper to show editor control window for a plugin
+        /// Detaches the VST3 editor from this window
+        /// </summary>
+        public void DetachEditor()
+        {
+            _editorHost.DetachEditor();
+        }
+
+        /// <summary>
+        /// Updates window size to match the VST3 editor's preferred size
+        /// </summary>
+        public void UpdateWindowSize()
+        {
+            _editorHost.UpdateSize();
+
+            if (_plugin.GetEditorSize(out int width, out int height))
+            {
+                Width = width;
+                Height = height;
+                MinWidth = width;
+                MinHeight = height;
+            }
+        }
+
+        /// <summary>
+        /// Resizes the VST3 editor to match window dimensions
+        /// </summary>
+        public void ResizeEditorToWindow()
+        {
+            _editorHost.ResizeEditor();
+        }
+
+        /// <summary>
+        /// Static helper to show editor window for a plugin
         /// </summary>
         /// <param name="plugin">The VST3 plugin</param>
         /// <param name="owner">Optional owner window</param>

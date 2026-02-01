@@ -75,7 +75,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libx11-dev
+          sudo apt-get install -y build-essential cmake
 
       # Install cross-compile tools for Linux ARM64
       - name: Install Linux ARM64 cross-compiler

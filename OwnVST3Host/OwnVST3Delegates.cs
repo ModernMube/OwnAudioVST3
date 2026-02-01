@@ -12,7 +12,7 @@ namespace OwnVST3Host
         private delegate IntPtr VST3Plugin_CreateDelegate();
         private delegate void VST3Plugin_DestroyDelegate(IntPtr handle);
         private delegate bool VST3Plugin_LoadPluginDelegate(IntPtr handle, string pluginPath);
-        private delegate bool VST3Plugin_OpenEditorDelegate(IntPtr handle, [MarshalAs(UnmanagedType.LPStr)] string title);
+        private delegate bool VST3Plugin_CreateEditorDelegate(IntPtr handle, IntPtr windowHandle);
         private delegate void VST3Plugin_CloseEditorDelegate(IntPtr handle);
         private delegate void VST3Plugin_ResizeEditorDelegate(IntPtr handle, int width, int height);
         private delegate bool VST3Plugin_GetEditorSizeDelegate(IntPtr handle, out int width, out int height);
@@ -42,7 +42,7 @@ namespace OwnVST3Host
             _createFunc = GetDelegate<VST3Plugin_CreateDelegate>("VST3Plugin_Create");
             _destroyFunc = GetDelegate<VST3Plugin_DestroyDelegate>("VST3Plugin_Destroy");
             _loadPluginFunc = GetDelegate<VST3Plugin_LoadPluginDelegate>("VST3Plugin_LoadPlugin");
-            _openEditorFunc = GetDelegate<VST3Plugin_OpenEditorDelegate>("VST3Plugin_OpenEditor");
+            _createEditorFunc = GetDelegate<VST3Plugin_CreateEditorDelegate>("VST3Plugin_CreateEditor");
             _closeEditorFunc = GetDelegate<VST3Plugin_CloseEditorDelegate>("VST3Plugin_CloseEditor");
             _resizeEditorFunc = GetDelegate<VST3Plugin_ResizeEditorDelegate>("VST3Plugin_ResizeEditor");
             _getEditorSizeFunc = GetDelegate<VST3Plugin_GetEditorSizeDelegate>("VST3Plugin_GetEditorSize");
@@ -82,7 +82,7 @@ namespace OwnVST3Host
             }
             return null;
         }
-
+        
         #endregion
     }
 }
