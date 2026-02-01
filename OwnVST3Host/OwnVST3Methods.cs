@@ -319,6 +319,29 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Process idle events - should be called periodically from UI thread.
+        /// This is essential for proper popup menu handling on all platforms,
+        /// especially when running with a separate audio thread.
+        /// </summary>
+        public void ProcessIdle()
+        {
+            CheckDisposed();
+            _processIdleFunc?.Invoke(_pluginHandle);
+        }
+
+        /// <summary>
+        /// Check if the editor window is currently open
+        /// </summary>
+        public bool IsEditorOpen
+        {
+            get
+            {
+                CheckDisposed();
+                return _isEditorOpenFunc?.Invoke(_pluginHandle) ?? false;
+            }
+        }
+
+        /// <summary>
         /// Gets all parameters
         /// </summary>
         /// <returns>List of parameters</returns>
