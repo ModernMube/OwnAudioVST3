@@ -25,7 +25,7 @@ namespace OwnVST3Host
         private VST3Plugin_CreateDelegate _createFunc;
         private VST3Plugin_DestroyDelegate _destroyFunc;
         private VST3Plugin_LoadPluginDelegate _loadPluginFunc;
-        private VST3Plugin_CreateEditorDelegate _createEditorFunc;
+        private VST3Plugin_OpenEditorDelegate _openEditorFunc;
         private VST3Plugin_CloseEditorDelegate _closeEditorFunc;
         private VST3Plugin_ResizeEditorDelegate _resizeEditorFunc;
         private VST3Plugin_GetEditorSizeDelegate _getEditorSizeFunc;
