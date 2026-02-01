@@ -270,10 +270,6 @@ public class MainWindow : Window
 
             // Open new editor
             _editorWindow = _currentPlugin.ShowEditor(this);
-            _editorWindow.EditorError += (s, args) =>
-            {
-                _statusText.Text = $"Editor error: {args.Message}";
-            };
             _editorWindow.Closed += (s, args) =>
             {
                 _editorWindow = null;
