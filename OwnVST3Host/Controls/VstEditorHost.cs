@@ -118,10 +118,18 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Attaches the VST3 editor to the native control
+        /// Attaches the VST3 editor to the native control.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void AttachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
+                return;
+            }
+
             if (_editorCreated || _plugin == null)
                 return;
 
@@ -174,10 +182,18 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Detaches the VST3 editor
+        /// Detaches the VST3 editor.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void DetachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(DetachEditor);
+                return;
+            }
+
             if (!_editorCreated || _plugin == null)
                 return;
 
@@ -240,10 +256,18 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Updates control size based on plugin editor size
+        /// Updates control size based on plugin editor size.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void UpdateSize()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(UpdateSize);
+                return;
+            }
+
             if (_plugin != null && _plugin.GetEditorSize(out int width, out int height))
             {
                 Width = width;
@@ -254,10 +278,18 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Resizes the editor to match control dimensions
+        /// Resizes the editor to match control dimensions.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void ResizeEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(ResizeEditor);
+                return;
+            }
+
             if (_editorCreated && _plugin != null)
             {
                 _plugin.ResizeEditor((int)Width, (int)Height);
