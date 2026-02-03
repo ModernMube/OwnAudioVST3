@@ -130,26 +130,50 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Attaches the VST3 editor to this window
+        /// Attaches the VST3 editor to this window.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void AttachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(AttachEditor);
+                return;
+            }
+
             _editorHost.AttachEditor();
         }
 
         /// <summary>
-        /// Detaches the VST3 editor from this window
+        /// Detaches the VST3 editor from this window.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void DetachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(DetachEditor);
+                return;
+            }
+
             _editorHost.DetachEditor();
         }
 
         /// <summary>
-        /// Updates window size to match the VST3 editor's preferred size
+        /// Updates window size to match the VST3 editor's preferred size.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void UpdateWindowSize()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(UpdateWindowSize);
+                return;
+            }
+
             _editorHost.UpdateSize();
 
             if (_plugin.GetEditorSize(out int width, out int height))
@@ -162,10 +186,18 @@ namespace OwnVST3Host.Controls
         }
 
         /// <summary>
-        /// Resizes the VST3 editor to match window dimensions
+        /// Resizes the VST3 editor to match window dimensions.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void ResizeEditorToWindow()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(ResizeEditorToWindow);
+                return;
+            }
+
             _editorHost.ResizeEditor();
         }
 

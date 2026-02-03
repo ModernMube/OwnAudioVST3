@@ -31,25 +31,36 @@ namespace OwnVST3Host.Services
         /// <summary>
         /// Opens an editor window for the specified plugin.
         /// If an editor is already open for this plugin, it will be focused.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         /// <param name="plugin">The VST3 plugin</param>
         /// <param name="owner">Optional owner window</param>
-        /// <returns>The editor window</returns>
-        public VstEditorWindow OpenEditor(OwnVst3Wrapper plugin, Window? owner = null)
+        /// <returns>The editor window, or null if called from non-UI thread (window will be created asynchronously)</returns>
+        public VstEditorWindow? OpenEditor(OwnVst3Wrapper plugin, Window? owner = null)
         {
             if (plugin == null)
                 throw new ArgumentNullException(nameof(plugin));
 
+            // Ensure we're on the UI thread for window creation
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                VstEditorWindow? result = null;
+                Dispatcher.UIThread.Post(() => result = OpenEditorInternal(plugin, owner));
+                return result;
+            }
+
+            return OpenEditorInternal(plugin, owner);
+        }
+
+        private VstEditorWindow OpenEditorInternal(OwnVst3Wrapper plugin, Window? owner)
+        {
             lock (_lock)
             {
                 // Check if editor already exists for this plugin
                 if (_openEditors.TryGetValue(plugin, out var existingWindow))
                 {
-                    Dispatcher.UIThread.Post(() =>
-                    {
-                        existingWindow.Activate();
-                        existingWindow.Focus();
-                    });
+                    existingWindow.Activate();
+                    existingWindow.Focus();
                     return existingWindow;
                 }
 
@@ -80,7 +91,30 @@ namespace OwnVST3Host.Services
         }
 
         /// <summary>
-        /// Opens an editor window as a dialog
+        /// Opens an editor window for the specified plugin asynchronously.
+        /// This method can be safely called from any thread.
+        /// </summary>
+        /// <param name="plugin">The VST3 plugin</param>
+        /// <param name="owner">Optional owner window</param>
+        /// <returns>The editor window</returns>
+        public async Task<VstEditorWindow> OpenEditorAsync(OwnVst3Wrapper plugin, Window? owner = null)
+        {
+            if (plugin == null)
+                throw new ArgumentNullException(nameof(plugin));
+
+            // If already on UI thread, execute directly
+            if (Dispatcher.UIThread.CheckAccess())
+            {
+                return OpenEditorInternal(plugin, owner);
+            }
+
+            // Otherwise, invoke on UI thread and wait for result
+            return await Dispatcher.UIThread.InvokeAsync(() => OpenEditorInternal(plugin, owner));
+        }
+
+        /// <summary>
+        /// Opens an editor window as a dialog.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         /// <param name="plugin">The VST3 plugin</param>
         /// <param name="owner">Owner window (required for dialog)</param>
@@ -92,6 +126,17 @@ namespace OwnVST3Host.Services
             if (owner == null)
                 throw new ArgumentNullException(nameof(owner));
 
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                return await Dispatcher.UIThread.InvokeAsync(async () => await OpenEditorDialogInternalAsync(plugin, owner));
+            }
+
+            return await OpenEditorDialogInternalAsync(plugin, owner);
+        }
+
+        private async Task<VstEditorWindow> OpenEditorDialogInternalAsync(OwnVst3Wrapper plugin, Window owner)
+        {
             var window = new VstEditorWindow(plugin);
 
             lock (_lock)
