@@ -3,14 +3,15 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Threading;
-using OwnVST3Editor.Platform;
+using OwnVST3Host.Platform;
 using OwnVST3Host;
 
-namespace OwnVST3Editor.Controls
+namespace OwnVST3Host.Controls
 {
     /// <summary>
     /// A control that hosts a VST3 plugin editor within an Avalonia layout.
     /// Uses platform-specific native child window embedding.
+    /// Includes idle timer for proper popup menu handling on all platforms.
     /// </summary>
     public class VstEditorHost : NativeControlHost
     {
@@ -18,6 +19,7 @@ namespace OwnVST3Editor.Controls
         private bool _editorCreated;
         private IntPtr _embeddedHandle;
         private bool _isAttached;
+        private DispatcherTimer? _idleTimer;
 
         /// <summary>
         /// Defines the Plugin property
@@ -116,10 +118,18 @@ namespace OwnVST3Editor.Controls
         }
 
         /// <summary>
-        /// Attaches the VST3 editor to the native control
+        /// Attaches the VST3 editor to the native control.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void AttachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
+                return;
+            }
+
             if (_editorCreated || _plugin == null)
                 return;
 
@@ -157,6 +167,7 @@ namespace OwnVST3Editor.Controls
                 if (success)
                 {
                     _editorCreated = true;
+                    StartIdleTimer();
                     EditorAttached?.Invoke(this, EventArgs.Empty);
                 }
                 else
@@ -171,15 +182,24 @@ namespace OwnVST3Editor.Controls
         }
 
         /// <summary>
-        /// Detaches the VST3 editor
+        /// Detaches the VST3 editor.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void DetachEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(DetachEditor);
+                return;
+            }
+
             if (!_editorCreated || _plugin == null)
                 return;
 
             try
             {
+                StopIdleTimer();
                 _plugin.CloseEditor();
                 _editorCreated = false;
                 EditorDetached?.Invoke(this, EventArgs.Empty);
@@ -191,10 +211,63 @@ namespace OwnVST3Editor.Controls
         }
 
         /// <summary>
-        /// Updates control size based on plugin editor size
+        /// Starts the idle timer for processing plugin UI events.
+        /// This is essential for proper popup menu handling when
+        /// running with a separate audio thread.
+        /// </summary>
+        private void StartIdleTimer()
+        {
+            if (_idleTimer != null) return;
+
+            _idleTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(16) // ~60fps for smooth UI
+            };
+            _idleTimer.Tick += OnIdleTimerTick;
+            _idleTimer.Start();
+        }
+
+        /// <summary>
+        /// Stops the idle timer
+        /// </summary>
+        private void StopIdleTimer()
+        {
+            if (_idleTimer != null)
+            {
+                _idleTimer.Stop();
+                _idleTimer.Tick -= OnIdleTimerTick;
+                _idleTimer = null;
+            }
+        }
+
+        /// <summary>
+        /// Called periodically to process plugin idle events
+        /// </summary>
+        private void OnIdleTimerTick(object? sender, EventArgs e)
+        {
+            try
+            {
+                _plugin?.ProcessIdle();
+            }
+            catch
+            {
+                // Ignore exceptions in idle processing
+            }
+        }
+
+        /// <summary>
+        /// Updates control size based on plugin editor size.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void UpdateSize()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(UpdateSize);
+                return;
+            }
+
             if (_plugin != null && _plugin.GetEditorSize(out int width, out int height))
             {
                 Width = width;
@@ -205,10 +278,18 @@ namespace OwnVST3Editor.Controls
         }
 
         /// <summary>
-        /// Resizes the editor to match control dimensions
+        /// Resizes the editor to match control dimensions.
+        /// This method ensures it runs on the UI thread.
         /// </summary>
         public void ResizeEditor()
         {
+            // Ensure we're on the UI thread
+            if (!Dispatcher.UIThread.CheckAccess())
+            {
+                Dispatcher.UIThread.Post(ResizeEditor);
+                return;
+            }
+
             if (_editorCreated && _plugin != null)
             {
                 _plugin.ResizeEditor((int)Width, (int)Height);

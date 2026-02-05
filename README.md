@@ -1,273 +1,122 @@
-<div align="center">
-  <img src="Ownaudiologo.png" alt="Logó" width="600"/>
-</div>
+# OwnAudioVST3
 
-<a href="https://www.buymeacoffee.com/ModernMube">
-  <img src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffe-orange" alt="Buy Me a Coffe">
-</a>
+<p align="center">
+  <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="600"/>
+</p>
 
-# OwnVst3 CSharp Wrapper
+A cross-platform C# wrapper for VST3 plugins with built-in visual editor support using Avalonia UI.
 
-This library enables loading and managing VST3 plugins in C# applications using the native OwnVst3 wrapper DLL.
+[![Build](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml/badge.svg)](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml)
+[![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnVst3Host/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-- Fully managed C# code
-- Cross-platform compatibility (Windows, Linux, macOS) using NativeLibrary.Load()
-- Automatic platform detection and native library loading
-- Complete VST3 plugin functionality support:
-  - Plugin loading and initialization
-  - Editor view management with size querying
-  - Parameter querying and modification
-  - Audio processing
-  - MIDI event handling
-  - Plugin information retrieval (name, vendor, version, type)
-- Built-in VST3 plugin discovery for platform-specific default directories
-- Automatic memory management and resource disposal (IDisposable)
+- **VST3 Plugin Loading** - Load and control VST3 instruments and effects
+- **Cross-Platform Editors** - Display plugin UIs on Windows, macOS, and Linux
+- **Parameter Control** - Get/set plugin parameters programmatically
+- **MIDI Support** - Send MIDI events to instruments
+- **Audio Processing** - Process audio buffers in real-time
+- **Native Performance** - Uses native C++ library for optimal performance
 
 ## Installation
 
-1. [Download or build the `ownvst3.dll` or `libownvst3.dylib` or `libownvst3.so` file.](https://github.com/ModernMube/OwnVST3/releases)
-2. Add the `OwnVST3Host` project or reference its DLL in your project
-3. Place the native library in one of the following locations:
-   - `runtimes/{rid}/native/` folder (recommended for NuGet-style deployment)
-   - Same directory as your application executable
-   - Or provide its full path when using the constructor
+Install via NuGet Package Manager:
+
+```bash
+dotnet add package OwnVst3Host
+```
+
+Or via Package Manager Console:
+
+```powershell
+Install-Package OwnVst3Host
+```
 
 ## Quick Start
 
 ```csharp
 using OwnVST3Host;
+using OwnVST3Host.Extensions;
 
-// Create VST3 plugin wrapper instance (auto-detects platform and library path)
-using (OwnVst3Wrapper vst = new OwnVst3Wrapper())
+// Load a VST3 plugin
+var plugin = new OwnVst3Wrapper();
+plugin.LoadPlugin("/path/to/plugin.vst3");
+plugin.Initialize(44100, 512);
+
+// Check if plugin has a visual editor
+if (plugin.HasEditor())
 {
-    // Load a VST3 plugin
-    if (vst.LoadPlugin("C:\\Plugins\\MyVst3Plugin.vst3"))
-    {
-        Console.WriteLine($"Plugin name: {vst.Name}");
-        Console.WriteLine($"Vendor: {vst.Vendor}");
-        Console.WriteLine($"Version: {vst.Version}");
-        Console.WriteLine($"Is Instrument: {vst.IsInstrument}");
-
-        // Initialize the plugin
-        vst.Initialize(44100.0, 512);
-
-        // Query parameters
-        var parameters = vst.GetAllParameters();
-        foreach (var param in parameters)
-        {
-            Console.WriteLine($"{param.Name}: {param.CurrentValue}");
-        }
-
-        // Audio processing...
-    }
-}
-```
-
-## Usage Guide
-
-### Loading a Plugin
-
-```csharp
-using OwnVST3Host;
-
-// Option 1: Auto-detect native library (recommended)
-OwnVst3Wrapper vst = new OwnVst3Wrapper();
-
-// Option 2: Specify custom path
-OwnVst3Wrapper vst = new OwnVst3Wrapper("path/to/ownvst3.dll");
-
-bool success = vst.LoadPlugin("path/to/plugin.vst3");
-```
-
-### Finding VST3 Plugins
-
-```csharp
-// Get default VST3 directories for current platform
-string[] directories = OwnVst3Wrapper.GetDefaultVst3Directories();
-
-// Find all VST3 plugins in default directories
-List<string> plugins = OwnVst3Wrapper.FindVst3Plugins();
-
-// Find plugins in specific directories
-List<string> plugins = OwnVst3Wrapper.FindVst3Plugins(new[] { "C:\\MyPlugins" }, includeSubdirectories: true);
-
-// Get diagnostic info about VST3 directories
-Console.WriteLine(OwnVst3Wrapper.GetVst3DirectoriesInfo());
-```
-
-### Initializing a Plugin
-
-```csharp
-bool success = vst.Initialize(44100.0, 512); // 44.1kHz, 512 sample block size
-```
-
-### Working with Parameters
-
-```csharp
-// Get parameter count
-int count = vst.GetParameterCount();
-
-// Get a specific parameter by index
-VST3Parameter param = vst.GetParameterAt(0);
-Console.WriteLine($"ID: {param.Id}, Name: {param.Name}");
-Console.WriteLine($"Range: {param.MinValue} - {param.MaxValue}");
-Console.WriteLine($"Default: {param.DefaultValue}, Current: {param.CurrentValue}");
-
-// Query all parameters
-List<VST3Parameter> parameters = vst.GetAllParameters();
-
-// Modify parameter by ID
-vst.SetParameter(parameterId, 0.75);
-
-// Query parameter value by ID
-double value = vst.GetParameter(parameterId);
-```
-
-### Audio Processing
-
-```csharp
-// Create 2-channel, 512-sample buffers
-int numChannels = 2;
-int numSamples = 512;
-float[][] inputs = new float[numChannels][];
-float[][] outputs = new float[numChannels][];
-
-for (int c = 0; c < numChannels; c++)
-{
-    inputs[c] = new float[numSamples];
-    outputs[c] = new float[numSamples];
+    // Open the editor window
+    var editorWindow = plugin.ShowEditor();
     
-    // Fill input data...
+    // Check if editor is currently open
+    bool isOpen = editorWindow.IsEditorActive;
 }
+
+// Get plugin information
+Console.WriteLine($"Name: {plugin.Name}");
+Console.WriteLine($"Vendor: {plugin.Vendor}");
+Console.WriteLine($"Type: {(plugin.IsInstrument ? "Instrument" : "Effect")}");
 
 // Process audio
-bool success = vst.ProcessAudio(inputs, outputs, numChannels, numSamples);
+plugin.ProcessAudio(inputBuffer, outputBuffer, sampleCount);
+
+// Clean up
+plugin.Dispose();
 ```
 
-### Sending MIDI Events
+## API Overview
 
-```csharp
-MidiEvent[] midiEvents = new MidiEvent[]
-{
-    new MidiEvent 
-    { 
-        Status = 0x90, // MIDI Note On, channel 1 
-        Data1 = 60,    // C4 note
-        Data2 = 100,   // Velocity
-        SampleOffset = 0 
-    }
-};
+### Core Methods
+- `LoadPlugin(path)` - Load a VST3 plugin
+- `Initialize(sampleRate, bufferSize)` - Initialize the audio engine
+- `ProcessAudio(input, output, samples)` - Process audio buffers
+- `Dispose()` - Clean up resources
 
-bool success = vst.ProcessMidi(midiEvents);
+### Editor Support
+- `HasEditor()` - Check if plugin has a visual editor
+- `ShowEditor()` - Open editor in a new window
+- `ShowEditor(owner)` - Open editor as child of owner window
+- `IsEditorActive` - Check if editor is currently open
+
+### Parameters
+- `GetParameterCount()` - Get number of parameters
+- `GetParameterValue(index)` - Get parameter value
+- `SetParameterValue(index, value)` - Set parameter value
+- `GetParameterInfo(index)` - Get parameter metadata
+
+### MIDI
+- `SendMidiEvent(status, data1, data2)` - Send MIDI message
+- `IsInstrument` - Check if plugin is a MIDI instrument
+
+## Platform Support
+
+| Platform | Supported | Architecture |
+|----------|-----------|--------------|
+| Windows  | ✅ | x64, x86, ARM64 |
+| macOS    | ✅ | x64, ARM64 (Universal) |
+| Linux    | ✅ | x64, ARM64 |
+
+## Building from Source
+
+```bash
+# Clone the repository with submodules
+git clone --recursive https://github.com/ModernMube/OwnVST3Sharp.git
+cd OwnVST3Sharp
+
+# Build the solution
+dotnet build OwnVST3Sharp.sln --configuration Release
+
+# Run the demo
+dotnet run --project OwnVST3EditorDemo
 ```
 
-### Disposing Resources
+## Project Structure
 
-```csharp
-// Automatic disposal in using block
-using (OwnVst3Wrapper vst = new OwnVst3Wrapper())
-{
-    // ... use plugin
-}
-
-// Or manual disposal
-OwnVst3Wrapper vst = new OwnVst3Wrapper();
-// ... use plugin
-vst.Dispose();
-```
-
-## Editor Management
-
-```csharp
-// Get the plugin's preferred editor size
-EditorSize? size = vst.GetEditorSize();
-if (size.HasValue)
-{
-    Console.WriteLine($"Preferred size: {size.Value.Width}x{size.Value.Height}");
-}
-
-// Or using out parameters
-if (vst.GetEditorSize(out int width, out int height))
-{
-    Console.WriteLine($"Preferred size: {width}x{height}");
-}
-
-// Create editor in a window
-IntPtr windowHandle = /* obtain window handle */;
-bool success = vst.CreateEditor(windowHandle);
-
-// Resize editor
-vst.ResizeEditor(800, 600);
-
-// Close editor
-vst.CloseEditor();
-```
-
-## Plugin Information
-
-```csharp
-// Get plugin metadata
-Console.WriteLine($"Name: {vst.Name}");
-Console.WriteLine($"Vendor: {vst.Vendor}");
-Console.WriteLine($"Version: {vst.Version}");
-Console.WriteLine($"Full Info: {vst.PluginInfo}");
-
-// Check plugin type
-if (vst.IsInstrument)
-    Console.WriteLine("This is a virtual instrument (VSTi)");
-if (vst.IsEffect)
-    Console.WriteLine("This is an audio effect");
-
-// Clear cached strings (for memory management)
-vst.ClearStringCache();
-```
-
-## Platform Utilities
-
-```csharp
-// Get runtime identifier (e.g., "win-x64", "linux-x64", "osx-arm64")
-string rid = OwnVst3Wrapper.GetRuntimeIdentifier();
-
-// Get native library name for current platform
-string libName = OwnVst3Wrapper.GetNativeLibraryName();
-// Returns: "ownvst3.dll" (Windows), "libownvst3.so" (Linux), "libownvst3.dylib" (macOS)
-
-// Get full path to native library (with automatic search)
-string libPath = OwnVst3Wrapper.GetNativeLibraryPath();
-```
-
-## System Requirements
-
-- .NET 6.0 or newer (required for NativeLibrary.Load API)
-- The `ownvst3.dll` or `libownvst3.dylib` or `libownvst3.so` native library
-- VST3 standard plugin files
-
-## Troubleshooting
-
-### DLL Not Found
-- Verify that the DLL path is correct
-- Place the DLL in the application directory
-- Check that any required dependencies of the DLL are also installed
-
-### Plugin Cannot Be Loaded
-- Verify that the plugin path is correct
-- Check that the plugin is in VST3 format
-- Verify that the plugin is compatible with the OwnVst3 library
-
-### Missing Functions
-- Make sure the native DLL is the correct version that contains all the required exported functions
-
-## Debugging Tips
-
-The OwnVst3Wrapper throws detailed exceptions in the following cases:
-- DllNotFoundException: The native DLL was not found
-- EntryPointNotFoundException: A required function was not found in the DLL
-- InvalidOperationException: Failed to create VST3 plugin instance
-- PlatformNotSupportedException: Unsupported operating system or architecture
-- ArgumentOutOfRangeException: Invalid parameter index
-- ObjectDisposedException: Attempt to use an already disposed wrapper instance
+- **OwnVST3Host** - Main library with VST3 wrapper and editor support
+- **OwnVST3EditorDemo** - Example application demonstrating usage
+- **OwnVST3** - Native C++ library (submodule)
 
 ## Support My Work
 
@@ -278,3 +127,16 @@ If you find this project helpful, consider buying me a coffee!
     alt="Buy Me A Coffee" 
     style="height: 60px !important;width: 217px !important;" >
  </a>
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE.txt](LICENSE.txt) file for details.
+
+## Acknowledgments
+
+- Built on top of the VST3 SDK
+- UI rendering powered by [Avalonia UI](https://avaloniaui.net/)
+
+## Support
+
+For issues, questions, or contributions, please open an issue on [GitHub](https://github.com/ModernMube/OwnVST3Sharp/issues).

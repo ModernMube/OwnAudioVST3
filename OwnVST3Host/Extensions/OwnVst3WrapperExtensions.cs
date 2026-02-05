@@ -1,8 +1,8 @@
 using Avalonia.Controls;
-using OwnVST3Editor.Controls;
+using OwnVST3Host.Controls;
 using OwnVST3Host;
 
-namespace OwnVST3Editor.Extensions
+namespace OwnVST3Host.Extensions
 {
     /// <summary>
     /// Extension methods for OwnVst3Wrapper to easily show VST3 editors

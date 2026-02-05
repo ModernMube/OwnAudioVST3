@@ -3,7 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
 
-namespace OwnVST3Editor.Platform
+namespace OwnVST3Host.Platform
 {
     /// <summary>
     /// Provides cross-platform native window handle retrieval for VST3 editor embedding

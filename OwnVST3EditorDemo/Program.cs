@@ -4,10 +4,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Themes.Fluent;
-using OwnVST3Editor;
-using OwnVST3Editor.Controls;
-using OwnVST3Editor.Extensions;
 using OwnVST3Host;
+using OwnVST3Host.Controls;
+using OwnVST3Host.Extensions;
 
 namespace OwnVST3EditorDemo;
 
@@ -155,7 +154,9 @@ public class MainWindow : Window
                 directories.Add(vst3Path);
             }
 
-            var plugins = OwnVst3Wrapper.FindVst3Plugins(directories.ToArray());
+            //var plugins = OwnVst3Wrapper.FindVst3Plugins(directories.ToArray());
+
+            var plugins = OwnVst3Wrapper.FindVst3Plugins();
             _pluginList.ItemsSource = plugins.Select(p => new PluginItem
             {
                 Path = p,
