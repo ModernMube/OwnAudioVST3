@@ -2,10 +2,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Themes.Fluent;
-using OwnVST3Editor.Controls;
+using OwnVST3Host.Controls;
 using OwnVST3Host;
 
-namespace OwnVST3Editor
+namespace OwnVST3Host
 {
     /// <summary>
     /// Avalonia application for VST3 editor windows

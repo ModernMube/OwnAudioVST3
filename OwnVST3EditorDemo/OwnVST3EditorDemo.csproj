@@ -14,10 +14,10 @@
 
   <!-- Avalonia packages -->
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.2.3" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.2.3" />
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.11" />
 
     <!-- Optional: for better debugging -->
     <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
@@ -26,7 +26,6 @@
   <!-- Project references -->
   <ItemGroup>
     <ProjectReference Include="..\OwnVST3Host\OwnVST3Host.csproj" />
-    <ProjectReference Include="..\OwnVST3Editor\OwnVST3Editor.csproj" />
   </ItemGroup>
 
 </Project>
