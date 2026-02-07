@@ -137,7 +137,25 @@ namespace OwnVST3Host.Controls
             }
 
             // Attach editor after native control is created
-            Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
+            // On Windows, add a small delay to ensure the window is fully initialized
+            // This prevents deadlocks and black screen issues
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                var timer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(200)
+                };
+                timer.Tick += (s, e) =>
+                {
+                    timer.Stop();
+                    AttachEditor();
+                };
+                timer.Start();
+            }
+            else
+            {
+                Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
+            }
 
             return handle!;
         }
