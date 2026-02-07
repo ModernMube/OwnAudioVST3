@@ -20,6 +20,7 @@ namespace OwnVST3Host.Controls
         private IntPtr _embeddedHandle;
         private bool _isAttached;
         private DispatcherTimer? _idleTimer;
+        private bool _windowsChildCreated;
 
         /// <summary>
         /// Defines the Plugin property
@@ -99,21 +100,67 @@ namespace OwnVST3Host.Controls
 
         protected override IPlatformHandle CreateNativeControlCore(IPlatformHandle parent)
         {
-            // Create the native control (child window)
+            // Try to create the native control through base implementation
             var handle = base.CreateNativeControlCore(parent);
 
-            // Store the native control handle for editor attachment
-            _embeddedHandle = handle?.Handle ?? parent.Handle;
+            // On Windows, if base doesn't create a child window, create one explicitly
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && handle == null)
+            {
+                try
+                {
+                    // Get initial size for child window
+                    int width = (int)Width;
+                    int height = (int)Height;
+                    if (width <= 0) width = 800;
+                    if (height <= 0) height = 600;
+
+                    // Create Windows child window for VST editor embedding
+                    IntPtr childHwnd = WindowsChildWindowHelper.CreateChildWindow(parent, width, height);
+                    _embeddedHandle = childHwnd;
+                    _windowsChildCreated = true;
+
+                    // Create a platform handle wrapper for the child window
+                    handle = new PlatformHandle(childHwnd, "HWND");
+                }
+                catch (Exception ex)
+                {
+                    OnEditorError($"Failed to create Windows child window: {ex.Message}");
+                    _embeddedHandle = parent.Handle; // Fallback to parent
+                    _windowsChildCreated = false;
+                }
+            }
+            else
+            {
+                // Store the native control handle for editor attachment
+                _embeddedHandle = handle?.Handle ?? parent.Handle;
+                _windowsChildCreated = false;
+            }
 
             // Attach editor after native control is created
             Dispatcher.UIThread.Post(AttachEditor, DispatcherPriority.Loaded);
 
-            return handle;
+            return handle!;
         }
 
         protected override void DestroyNativeControlCore(IPlatformHandle control)
         {
             DetachEditor();
+
+            // Clean up Windows child window if we created it
+            if (_windowsChildCreated && _embeddedHandle != IntPtr.Zero)
+            {
+                try
+                {
+                    WindowsChildWindowHelper.DestroyChildWindow(_embeddedHandle);
+                }
+                catch
+                {
+                    // Ignore errors during cleanup
+                }
+                _windowsChildCreated = false;
+                _embeddedHandle = IntPtr.Zero;
+            }
+
             base.DestroyNativeControlCore(control);
         }
 
@@ -292,6 +339,12 @@ namespace OwnVST3Host.Controls
 
             if (_editorCreated && _plugin != null)
             {
+                // Resize the Windows child window if we created it
+                if (_windowsChildCreated && _embeddedHandle != IntPtr.Zero)
+                {
+                    WindowsChildWindowHelper.ResizeChildWindow(_embeddedHandle, (int)Width, (int)Height);
+                }
+
                 _plugin.ResizeEditor((int)Width, (int)Height);
             }
         }
