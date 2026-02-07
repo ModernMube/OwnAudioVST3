@@ -222,6 +222,8 @@ jobs:
     needs: build-native
     runs-on: ubuntu-latest
     name: Update Native Libraries
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
