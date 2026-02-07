@@ -361,3 +361,5 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+WINDOWS_VST_EDITOR_FIX.md
