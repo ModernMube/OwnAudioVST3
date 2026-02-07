@@ -127,13 +127,22 @@ jobs:
   # Build C# Project (root of this repo)
   # ============================================
   build-csharp:
-    needs: build-native
+    needs: [build-native, update-native-libs]
+    if: always() && needs.build-native.result == 'success'
     runs-on: ubuntu-latest
     name: C# Build & Package
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      # Pull latest changes from update-native-libs job
+      - name: Pull latest native libraries
+        if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
+        run: |
+          git pull origin ${{ github.ref_name }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
