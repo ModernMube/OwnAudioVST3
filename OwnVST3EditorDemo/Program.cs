@@ -5,8 +5,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Themes.Fluent;
 using OwnVST3Host;
-using OwnVST3Host.Controls;
-using OwnVST3Host.Extensions;
+using OwnVST3Host.NativeWindow;
 
 namespace OwnVST3EditorDemo;
 
@@ -52,8 +51,11 @@ public class MainWindow : Window
     private readonly ListBox _pluginList;
     private readonly TextBlock _statusText;
     private readonly Button _openEditorButton;
+    private readonly Button _playButton;
+    private readonly Button _stopButton;
     private readonly StackPanel _pluginInfoPanel;
-    private VstEditorWindow? _editorWindow;
+    private VstEditorController? _editorController;
+    private WhiteNoiseProcessor? _noiseProcessor;
 
     public MainWindow()
     {
@@ -104,6 +106,28 @@ public class MainWindow : Window
         };
         _openEditorButton.Click += OnOpenEditorClick;
         _pluginInfoPanel.Children.Add(_openEditorButton);
+
+        // Play button
+        _playButton = new Button
+        {
+            Content = "▶ Play White Noise (60s)",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsEnabled = false,
+            Background = new SolidColorBrush(Color.FromRgb(0, 120, 215))
+        };
+        _playButton.Click += OnPlayClick;
+        _pluginInfoPanel.Children.Add(_playButton);
+
+        // Stop button
+        _stopButton = new Button
+        {
+            Content = "⏹ Stop",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsEnabled = false,
+            Background = new SolidColorBrush(Color.FromRgb(200, 50, 50))
+        };
+        _stopButton.Click += OnStopClick;
+        _pluginInfoPanel.Children.Add(_stopButton);
 
         var refreshButton = new Button
         {
@@ -181,7 +205,10 @@ public class MainWindow : Window
 
         try
         {
-            // Dispose previous plugin
+            // Dispose previous plugin and editor
+            _editorController?.CloseEditor();
+            _editorController?.Dispose();
+            _editorController = null;
             _currentPlugin?.Dispose();
             _currentPlugin = null;
 
@@ -205,8 +232,10 @@ public class MainWindow : Window
                 // Update info panel
                 UpdatePluginInfo();
 
-                bool hasEditor = _currentPlugin.HasEditor();
+                // Ellenőrizzük, hogy van-e editor (GetEditorSize() null-t ad vissza, ha nincs)
+                bool hasEditor = _currentPlugin.GetEditorSize().HasValue;
                 _openEditorButton.IsEnabled = hasEditor;
+                _playButton.IsEnabled = true;
                 _statusText.Text = hasEditor
                     ? $"Loaded: {pluginName}"
                     : $"Loaded: {pluginName} (no editor available)";
@@ -215,12 +244,52 @@ public class MainWindow : Window
             {
                 _statusText.Text = "Failed to load plugin";
                 _openEditorButton.IsEnabled = false;
+                _playButton.IsEnabled = false;
             }
         }
         catch (Exception ex)
         {
             _statusText.Text = $"Error: {ex.Message}";
             _openEditorButton.IsEnabled = false;
+            _playButton.IsEnabled = false;
+        }
+    }
+
+    private void OnPlayClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (_currentPlugin == null) return;
+
+        try
+        {
+            _noiseProcessor?.Dispose();
+            _noiseProcessor = new WhiteNoiseProcessor(_currentPlugin);
+            _noiseProcessor.Start();
+
+            _playButton.IsEnabled = false;
+            _stopButton.IsEnabled = true;
+            _statusText.Text = "Processing white noise through VST plugin...";
+        }
+        catch (Exception ex)
+        {
+            _statusText.Text = $"Error starting playback: {ex.Message}";
+        }
+    }
+
+    private void OnStopClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        try
+        {
+            _noiseProcessor?.Stop();
+            _noiseProcessor?.Dispose();
+            _noiseProcessor = null;
+
+            _playButton.IsEnabled = _currentPlugin != null;
+            _stopButton.IsEnabled = false;
+            _statusText.Text = "Processing stopped";
+        }
+        catch (Exception ex)
+        {
+            _statusText.Text = $"Error stopping playback: {ex.Message}";
         }
     }
 
@@ -242,7 +311,7 @@ public class MainWindow : Window
         AddInfoLine("Type", _currentPlugin.IsInstrument ? "Instrument" : (_currentPlugin.IsEffect ? "Effect" : "Unknown"));
         AddInfoLine("Parameters", _currentPlugin.GetParameterCount().ToString());
 
-        var size = _currentPlugin.GetPreferredEditorSize();
+        var size = _currentPlugin.GetEditorSize();
         if (size.HasValue)
         {
             AddInfoLine("Editor Size", $"{size.Value.Width} x {size.Value.Height}");
@@ -265,22 +334,27 @@ public class MainWindow : Window
 
         try
         {
-            // Close existing editor if open
-            _editorWindow?.Close();
-
-            // Open new editor
-            _editorWindow = _currentPlugin.ShowEditor(this);
-            _editorWindow.EditorError += (s, args) =>
+            // Ha már van nyitva editor, bezárjuk
+            if (_editorController?.IsEditorOpen == true)
             {
-                _statusText.Text = $"Editor error: {args.Message}";
-            };
-            _editorWindow.Closed += (s, args) =>
-            {
-                _editorWindow = null;
+                _editorController.CloseEditor();
+                _openEditorButton.Content = "Open Editor";
                 _statusText.Text = "Editor closed";
-            };
+                return;
+            }
 
-            _statusText.Text = "Editor opened";
+            // Új editor controller létrehozása ha még nincs
+            if (_editorController == null)
+            {
+                _editorController = new VstEditorController(_currentPlugin);
+            }
+
+            // Editor megnyitása natív ablakban
+            string pluginName = _currentPlugin.Name ?? "VST3 Plugin";
+            _editorController.OpenEditor(pluginName);
+
+            _openEditorButton.Content = "Close Editor";
+            _statusText.Text = "Editor opened in native window";
         }
         catch (Exception ex)
         {
@@ -290,7 +364,10 @@ public class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        _editorWindow?.Close();
+        _noiseProcessor?.Stop();
+        _noiseProcessor?.Dispose();
+        _editorController?.CloseEditor();
+        _editorController?.Dispose();
         _currentPlugin?.Dispose();
         base.OnClosed(e);
     }

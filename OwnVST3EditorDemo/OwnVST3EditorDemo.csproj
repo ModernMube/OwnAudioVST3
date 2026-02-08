@@ -21,6 +21,7 @@
 
     <!-- Optional: for better debugging -->
     <PackageReference Include="Avalonia.Diagnostics" Version="11.2.3" Condition="'$(Configuration)' == 'Debug'" />
+    <PackageReference Include="OwnAudioSharp" Version="2.5.4" />
   </ItemGroup>
 
   <!-- Project references -->
