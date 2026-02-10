@@ -14,6 +14,19 @@ namespace OwnVST3Host.NativeWindow
 
         public bool IsOpen => _nsWindow != IntPtr.Zero;
 
+        public bool IsActive
+        {
+            get
+            {
+                if (_nsWindow == IntPtr.Zero)
+                    return false;
+
+                // Check if this window is the key window (has keyboard focus)
+                IntPtr result = objc_msgSend(_nsWindow, sel_registerName("isKeyWindow"));
+                return result != IntPtr.Zero;
+            }
+        }
+
         public event Action<int, int>? OnResize;
         public event Action? OnClosed;
 
@@ -153,6 +166,10 @@ namespace OwnVST3Host.NativeWindow
             // VST3 pluginok macOS-en NSView-t várnak
             return _nsView;
         }
+
+        public void Invoke(Action action) => action();
+
+        public void BeginInvoke(Action action) => action();
 
         public void Dispose()
         {

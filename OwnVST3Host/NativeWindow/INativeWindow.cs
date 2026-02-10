@@ -33,6 +33,12 @@ namespace OwnVST3Host.NativeWindow
         bool IsOpen { get; }
 
         /// <summary>
+        /// Ellenőrzi, hogy az ablak aktív-e (key window / foreground window)
+        /// Ez használható a VST dropdown menük bezárásának detektálására
+        /// </summary>
+        bool IsActive { get; }
+
+        /// <summary>
         /// Esemény, amely akkor hívódik meg, amikor az ablak átméretezésre kerül
         /// </summary>
         event Action<int, int>? OnResize;
@@ -41,5 +47,18 @@ namespace OwnVST3Host.NativeWindow
         /// Esemény, amely akkor hívódik meg, amikor az ablak bezárul
         /// </summary>
         event Action? OnClosed;
+
+        /// <summary>
+        /// Szinkron módon végrehajt egy műveletet az ablak szálán.
+        /// Windows-on ez a dedikált ablak szálra marshalja a hívást,
+        /// macOS-en és Linux-on közvetlenül végrehajtja.
+        /// </summary>
+        void Invoke(Action action);
+
+        /// <summary>
+        /// Aszinkron módon végrehajt egy műveletet az ablak szálán.
+        /// Nem vár a művelet befejezésére.
+        /// </summary>
+        void BeginInvoke(Action action);
     }
 }

@@ -14,6 +14,11 @@ namespace OwnVST3Host.NativeWindow
 
         public bool IsOpen => _window != IntPtr.Zero;
 
+        // Note: X11 focus detection is complex and requires additional event handling
+        // For now, we always return true on Linux to avoid breaking the interface
+        // VST dropdown menu issues are less common on Linux anyway
+        public bool IsActive => _window != IntPtr.Zero;
+
         public event Action<int, int>? OnResize;
         public event Action? OnClosed;
 
@@ -138,6 +143,10 @@ namespace OwnVST3Host.NativeWindow
         {
             return _window;
         }
+
+        public void Invoke(Action action) => action();
+
+        public void BeginInvoke(Action action) => action();
 
         public void Dispose()
         {

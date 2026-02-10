@@ -3,162 +3,158 @@ using System;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// VST Editor Controller - Kezeli a VST plugin editor ablakát natív módon
+    /// Controller for managing a VST plugin editor window.
+    ///
+    /// Threading model:
+    /// - A natív ablak (HWND) dedikált szálon fut saját Win32 message loop-pal
+    /// - A CreateEditor/CloseEditor hívások a HÍVÓ szálon futnak (ahol a plugin betöltődött)
+    /// - Az attached() közben a HWND szál szabadon pumpálja az üzeneteket
+    /// - Ez megakadályozza a cross-thread SendMessage deadlockot
     /// </summary>
     public class VstEditorController : IDisposable
     {
         private readonly OwnVst3Wrapper _vst3Wrapper;
         private INativeWindow? _nativeWindow;
+        private System.Threading.Timer? _idleTimer;
         private bool _disposed = false;
 
-        /// <summary>
-        /// Ellenőrzi, hogy az editor ablak nyitva van-e
-        /// </summary>
-        public bool IsEditorOpen => _nativeWindow?.IsOpen ?? false;
+        private const int IdleIntervalMs = 20; // 50Hz for GUI updates
 
-        /// <summary>
-        /// Konstruktor
-        /// </summary>
-        /// <param name="vst3Wrapper">A VST3 wrapper példány, amelyhez az editor tartozik</param>
         public VstEditorController(OwnVst3Wrapper vst3Wrapper)
         {
             _vst3Wrapper = vst3Wrapper ?? throw new ArgumentNullException(nameof(vst3Wrapper));
         }
 
+        public bool IsOpen => _nativeWindow?.IsOpen ?? false;
+
+        public bool IsEditorOpen => IsOpen;
+
         /// <summary>
-        /// Megnyitja a VST plugin editor ablakát
+        /// Opens the VST editor window.
+        /// A HWND dedikált szálon jön létre (saját message loop-pal),
+        /// de a CreateEditor a hívó szálon fut (ahol a controller létrejött).
         /// </summary>
-        /// <param name="title">Az ablak címe (opcionális, alapértelmezett: plugin neve)</param>
-        public void OpenEditor(string? title = null)
+        public void OpenEditor(string windowTitle)
         {
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(nameof(VstEditorController));
-            }
+            if (_disposed) throw new ObjectDisposedException(nameof(VstEditorController));
 
-            if (IsEditorOpen)
-            {
-                throw new InvalidOperationException("Az editor ablak már nyitva van!");
-            }
-
-            // Plugin méret lekérése
-            var editorSize = _vst3Wrapper.GetEditorSize();
-            if (editorSize == null)
-            {
-                throw new InvalidOperationException("A plugin nem támogatja az editor funkciót vagy nem sikerült lekérni a méretet!");
-            }
-
-            // Ablak cím meghatározása
-            string windowTitle = title ?? _vst3Wrapper.Name ?? "VST3 Plugin Editor";
+            if (IsOpen) return;
 
             try
             {
-                // Natív ablak létrehozása
-                _nativeWindow = NativeWindowFactory.Create();
+                var editorSize = _vst3Wrapper.GetEditorSize() ?? new EditorSize(800, 600);
 
-                // Eseménykezelők csatolása
+                _nativeWindow = NativeWindowFactory.Create();
                 _nativeWindow.OnClosed += OnWindowClosed;
                 _nativeWindow.OnResize += OnWindowResized;
 
-                // Ablak megnyitása
-                _nativeWindow.Open(windowTitle, editorSize.Value.Width, editorSize.Value.Height);
+                // Ablak létrehozása a dedikált szálon (Windows-on saját message loop-pal)
+                _nativeWindow.Open(windowTitle, editorSize.Width, editorSize.Height);
 
-                // VST editor csatolása az ablakhoz
                 IntPtr windowHandle = _nativeWindow.GetHandle();
+
+                // KRITIKUS: CreateEditor a HÍVÓ (Avalonia UI) szálon fut!
+                // A controller és a view ezen a szálon jött létre.
+                // A HWND viszont a dedikált window thread-en van, ami fut és pumpálja
+                // az üzeneteket. Így az attached() közben:
+                // - Ha a plugin SendMessage-t küld a HWND-nek → a window thread feldolgozza
+                // - Ha a plugin COM hívást csinál → az Avalonia szálon fut (direkt hívás)
+                // - Nincs deadlock!
                 bool success = _vst3Wrapper.CreateEditor(windowHandle);
 
                 if (!success)
                 {
-                    // Ha nem sikerült, bezárjuk az ablakot
-                    _nativeWindow.Close();
-                    _nativeWindow.Dispose();
-                    _nativeWindow = null;
+                    CloseEditor();
                     throw new InvalidOperationException("Nem sikerült létrehozni a VST editor-t!");
                 }
+
+                _idleTimer = new System.Threading.Timer(OnIdleTimer, null, IdleIntervalMs, IdleIntervalMs);
             }
             catch
             {
-                // Hiba esetén tisztítás
-                if (_nativeWindow != null)
-                {
-                    _nativeWindow.OnClosed -= OnWindowClosed;
-                    _nativeWindow.OnResize -= OnWindowResized;
-                    _nativeWindow.Dispose();
-                    _nativeWindow = null;
-                }
+                CloseEditor();
                 throw;
             }
         }
 
-        /// <summary>
-        /// Bezárja a VST plugin editor ablakát
-        /// </summary>
         public void CloseEditor()
         {
-            if (_disposed)
-            {
-                throw new ObjectDisposedException(nameof(VstEditorController));
-            }
-
-            if (!IsEditorOpen)
-            {
-                return; // Nincs mit bezárni
-            }
-
             try
             {
-                // Először a VST editor-t zárjuk be
-                _vst3Wrapper.CloseEditor();
+                if (_idleTimer != null)
+                {
+                    _idleTimer.Dispose();
+                    _idleTimer = null;
+                }
+
+                if (_nativeWindow != null)
+                {
+                    var win = _nativeWindow;
+                    _nativeWindow = null;
+
+                    // VST editor bezárása a hívó szálon
+                    try
+                    {
+                        _vst3Wrapper.CloseEditor();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}");
+                    }
+
+                    win.OnClosed -= OnWindowClosed;
+                    win.OnResize -= OnWindowResized;
+                    win.Close();
+                    win.Dispose();
+                }
             }
             catch (Exception ex)
             {
-                // Logolhatjuk a hibát, de folytatjuk az ablak bezárását
                 Console.WriteLine($"Hiba a VST editor bezárásakor: {ex.Message}");
-            }
-
-            // Aztán az ablakot
-            if (_nativeWindow != null)
-            {
-                _nativeWindow.OnClosed -= OnWindowClosed;
-                _nativeWindow.OnResize -= OnWindowResized;
-                _nativeWindow.Close();
-                _nativeWindow.Dispose();
-                _nativeWindow = null;
             }
         }
 
-        /// <summary>
-        /// Eseménykezelő az ablak bezárásakor
-        /// </summary>
         private void OnWindowClosed()
         {
-            // Ha a felhasználó bezárja az ablakot, tisztítjuk a VST editor-t is
+            // Az ablak bezárás gombjával (X) zárták be - window thread-ről hívódik
             try
             {
+                _idleTimer?.Dispose();
+                _idleTimer = null;
+
                 _vst3Wrapper.CloseEditor();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Hiba a VST editor bezárásakor: {ex.Message}");
+                Console.WriteLine($"[VST Editor] Error in OnWindowClosed: {ex.Message}");
             }
 
             if (_nativeWindow != null)
             {
                 _nativeWindow.OnClosed -= OnWindowClosed;
                 _nativeWindow.OnResize -= OnWindowResized;
-                _nativeWindow.Dispose();
                 _nativeWindow = null;
             }
         }
 
-        /// <summary>
-        /// Eseménykezelő az ablak átméretezésekor
-        /// </summary>
+        private void OnIdleTimer(object? state)
+        {
+            if (_disposed || _nativeWindow == null) return;
+            try
+            {
+                // ProcessIdle a window thread-en fut (üzenet pumpálás)
+                _nativeWindow.BeginInvoke(() => _vst3Wrapper.ProcessIdle());
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[VST DEBUG] ERROR in OnIdleTimer: {ex.Message}");
+            }
+        }
+
         private void OnWindowResized(int width, int height)
         {
             try
             {
-                // Értesítjük a VST plugin-t az új méretről
                 _vst3Wrapper.ResizeEditor(width, height);
             }
             catch (Exception ex)
@@ -167,9 +163,6 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
-        /// <summary>
-        /// Dispose pattern implementálása
-        /// </summary>
         public void Dispose()
         {
             if (!_disposed)
