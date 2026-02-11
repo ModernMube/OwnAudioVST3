@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace OwnVST3Host.NativeWindow
 {
@@ -11,6 +12,10 @@ namespace OwnVST3Host.NativeWindow
         private IntPtr _nsWindow = IntPtr.Zero;
         private IntPtr _nsView = IntPtr.Zero;
         private bool _disposed = false;
+
+        // A fő szál referenciája - macOS-en minden Cocoa/AppKit műveletnek
+        // a fő (main) szálon kell futnia, különben undefined behavior
+        private static readonly IntPtr _mainQueue = dispatch_get_main_queue();
 
         public bool IsOpen => _nsWindow != IntPtr.Zero;
 
@@ -72,6 +77,76 @@ namespace OwnVST3Host.NativeWindow
 
         #endregion
 
+        #region GCD (Grand Central Dispatch) for main thread marshaling
+
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern IntPtr dispatch_get_main_queue();
+
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern void dispatch_async_f(IntPtr queue, IntPtr context, dispatch_function_t work);
+
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern void dispatch_sync_f(IntPtr queue, IntPtr context, dispatch_function_t work);
+
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern int pthread_main_np();
+
+        private delegate void dispatch_function_t(IntPtr context);
+
+        private static bool IsMainThread() => pthread_main_np() != 0;
+
+        /// <summary>
+        /// Aszinkron módon futtat egy műveletet a macOS fő szálán (dispatch_async).
+        /// A GCHandle biztosítja, hogy az Action nem kerül felszabadításra a GC által.
+        /// </summary>
+        private static void DispatchToMainAsync(Action action)
+        {
+            if (IsMainThread())
+            {
+                action();
+                return;
+            }
+
+            var handle = GCHandle.Alloc(action);
+            dispatch_async_f(_mainQueue, GCHandle.ToIntPtr(handle), DispatchCallback);
+        }
+
+        /// <summary>
+        /// Szinkron módon futtat egy műveletet a macOS fő szálán (dispatch_sync).
+        /// FIGYELEM: Ha a fő szálról hívjuk, közvetlenül végrehajtja (deadlock elkerülése).
+        /// </summary>
+        private static void DispatchToMainSync(Action action)
+        {
+            if (IsMainThread())
+            {
+                action();
+                return;
+            }
+
+            var handle = GCHandle.Alloc(action);
+            dispatch_sync_f(_mainQueue, GCHandle.ToIntPtr(handle), DispatchCallback);
+        }
+
+        /// <summary>
+        /// GCD callback - ez fut a fő szálon.
+        /// Kicsomagolja a GCHandle-ből az Action-t és végrehajtja.
+        /// </summary>
+        private static void DispatchCallback(IntPtr context)
+        {
+            var handle = GCHandle.FromIntPtr(context);
+            try
+            {
+                var action = (Action)handle.Target!;
+                action();
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        #endregion
+
         public void Open(string title, int width, int height)
         {
             if (_nsWindow != IntPtr.Zero)
@@ -117,6 +192,9 @@ namespace OwnVST3Host.NativeWindow
             // KRITIKUS: Beállítjuk, hogy az ablak ne tűnjön el, amikor elveszíti a fókuszt
             // Ez elengedhetetlen a VST plugin dropdown menük helyes működéséhez
             objc_msgSend(_nsWindow, sel_registerName("setHidesOnDeactivate:"), false);
+
+            // Egéresemények engedélyezése - szükséges a dropdown menük helyes tracking-jéhez
+            objc_msgSend(_nsWindow, sel_registerName("setAcceptsMouseMovedEvents:"), true);
 
             // Ablak középre igazítása (ezt a megjelenítés ELŐTT kell meghívni)
             objc_msgSend(_nsWindow, sel_registerName("center"));
@@ -167,9 +245,19 @@ namespace OwnVST3Host.NativeWindow
             return _nsView;
         }
 
-        public void Invoke(Action action) => action();
+        /// <summary>
+        /// Szinkron végrehajtás a fő szálon.
+        /// macOS-en minden AppKit/Cocoa műveletnek a fő szálon kell futnia.
+        /// </summary>
+        public void Invoke(Action action) => DispatchToMainSync(action);
 
-        public void BeginInvoke(Action action) => action();
+        /// <summary>
+        /// Aszinkron végrehajtás a fő szálon.
+        /// macOS-en minden AppKit/Cocoa műveletnek a fő szálon kell futnia.
+        /// A System.Threading.Timer callback ThreadPool szálról hív, ezért
+        /// GCD dispatch_async-kal marshalunk a main queue-ra.
+        /// </summary>
+        public void BeginInvoke(Action action) => DispatchToMainAsync(action);
 
         public void Dispose()
         {
