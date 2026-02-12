@@ -5,7 +5,7 @@ using System.Threading;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// macOS natív ablakkezelés Cocoa/Objective-C Runtime használatával
+    /// macOS native window management using Cocoa/Objective-C Runtime
     /// </summary>
     internal class NativeWindowMac : INativeWindow
     {
@@ -13,8 +13,8 @@ namespace OwnVST3Host.NativeWindow
         private IntPtr _nsView = IntPtr.Zero;
         private bool _disposed = false;
 
-        // A fő szál referenciája - macOS-en minden Cocoa/AppKit műveletnek
-        // a fő (main) szálon kell futnia, különben undefined behavior
+        // Main thread reference - on macOS all Cocoa/AppKit operations
+        // must run on the main thread, otherwise undefined behavior
         private static readonly IntPtr _mainQueue = dispatch_get_main_queue();
 
         public bool IsOpen => _nsWindow != IntPtr.Zero;
@@ -77,7 +77,7 @@ namespace OwnVST3Host.NativeWindow
 
         #endregion
 
-        #region GCD (Grand Central Dispatch) for main thread marshaling
+        #region GCD (Grand Central Dispatch) and CFRunLoop for main thread marshaling
 
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern IntPtr dispatch_get_main_queue();
@@ -93,11 +93,55 @@ namespace OwnVST3Host.NativeWindow
 
         private delegate void dispatch_function_t(IntPtr context);
 
+        // CFRunLoop API - supports explicit RunLoop modes
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern IntPtr CFRunLoopGetMain();
+
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern IntPtr CFRunLoopTimerCreate(
+            IntPtr allocator,
+            double fireDate,
+            double interval,
+            ulong flags,
+            long order,
+            CFRunLoopTimerCallBack callout,
+            IntPtr context);
+
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern void CFRunLoopAddTimer(IntPtr rl, IntPtr timer, IntPtr mode);
+
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern double CFAbsoluteTimeGetCurrent();
+
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern void CFRelease(IntPtr cf);
+
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern void CFRunLoopWakeUp(IntPtr rl);
+
+        private delegate void CFRunLoopTimerCallBack(IntPtr timer, IntPtr info);
+
+        // kCFRunLoopCommonModes constant (CFStringRef)
+        // This mode set contains both NSDefaultRunLoopMode AND NSEventTrackingRunLoopMode
+        // So our callback runs even when a dropdown menu is open (tracking mode)
+        private static readonly IntPtr kCFRunLoopCommonModes;
+
+        static NativeWindowMac()
+        {
+            // Get kCFRunLoopCommonModes constant from Objective-C runtime
+            // This is the CFStringRef representation of the "kCFRunLoopCommonModes" string
+            IntPtr nsStringClass = objc_getClass("NSString");
+            kCFRunLoopCommonModes = objc_msgSend(nsStringClass, sel_registerName("stringWithUTF8String:"),
+                Marshal.StringToHGlobalAnsi("kCFRunLoopCommonModes"));
+        }
+
         private static bool IsMainThread() => pthread_main_np() != 0;
 
         /// <summary>
-        /// Aszinkron módon futtat egy műveletet a macOS fő szálán (dispatch_async).
-        /// A GCHandle biztosítja, hogy az Action nem kerül felszabadításra a GC által.
+        /// Asynchronously executes an operation on the macOS main thread.
+        /// Uses CFRunLoopTimer with kCFRunLoopCommonModes, which ensures
+        /// that the callback runs even when a dropdown menu is in tracking mode.
+        /// This solves VST plugin editor freezing on macOS.
         /// </summary>
         private static void DispatchToMainAsync(Action action)
         {
@@ -107,13 +151,45 @@ namespace OwnVST3Host.NativeWindow
                 return;
             }
 
+            // Create GCHandle - ensures the Action is not garbage collected
             var handle = GCHandle.Alloc(action);
-            dispatch_async_f(_mainQueue, GCHandle.ToIntPtr(handle), DispatchCallback);
+
+            // Create one-shot timer that fires immediately on the main RunLoop
+            // fireDate: current time (immediately)
+            // interval: 0 (one-shot, does not repeat)
+            double fireDate = CFAbsoluteTimeGetCurrent();
+            IntPtr timer = CFRunLoopTimerCreate(
+                IntPtr.Zero,                    // allocator (default)
+                fireDate,                       // fireDate (now, immediately)
+                0,                              // interval (0 = one-shot)
+                0,                              // flags
+                0,                              // order
+                TimerCallback,                  // callback
+                GCHandle.ToIntPtr(handle));     // context (GCHandle pointer)
+
+            if (timer == IntPtr.Zero)
+            {
+                handle.Free();
+                throw new InvalidOperationException("Failed to create CFRunLoopTimer");
+            }
+
+            // Add timer to main RunLoop with kCFRunLoopCommonModes
+            // This guarantees that the timer fires even when:
+            // - NSDefaultRunLoopMode is active (normal operation)
+            // - NSEventTrackingRunLoopMode is active (dropdown menu, scrolling, etc.)
+            IntPtr mainRunLoop = CFRunLoopGetMain();
+            CFRunLoopAddTimer(mainRunLoop, timer, kCFRunLoopCommonModes);
+
+            // Wake up RunLoop if it's waiting
+            CFRunLoopWakeUp(mainRunLoop);
+
+            // Release timer - the RunLoop owns it until it fires
+            CFRelease(timer);
         }
 
         /// <summary>
-        /// Szinkron módon futtat egy műveletet a macOS fő szálán (dispatch_sync).
-        /// FIGYELEM: Ha a fő szálról hívjuk, közvetlenül végrehajtja (deadlock elkerülése).
+        /// Synchronously executes an operation on the macOS main thread (dispatch_sync).
+        /// WARNING: If called from the main thread, executes directly (avoids deadlock).
         /// </summary>
         private static void DispatchToMainSync(Action action)
         {
@@ -128,8 +204,31 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// GCD callback - ez fut a fő szálon.
-        /// Kicsomagolja a GCHandle-ből az Action-t és végrehajtja.
+        /// CFRunLoopTimer callback - runs on the main thread (RunLoop context).
+        /// Unwraps the Action from the GCHandle and executes it.
+        /// The 'timer' parameter is the CFRunLoopTimer reference, 'info' is the context (GCHandle pointer).
+        /// </summary>
+        private static void TimerCallback(IntPtr timer, IntPtr info)
+        {
+            var handle = GCHandle.FromIntPtr(info);
+            try
+            {
+                var action = (Action)handle.Target!;
+                action();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NativeWindowMac] Error in TimerCallback: {ex.Message}");
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+
+        /// <summary>
+        /// GCD callback (used for dispatch_sync) - runs on the main thread.
+        /// Unwraps the Action from the GCHandle and executes it.
         /// </summary>
         private static void DispatchCallback(IntPtr context)
         {
@@ -151,28 +250,30 @@ namespace OwnVST3Host.NativeWindow
         {
             if (_nsWindow != IntPtr.Zero)
             {
-                throw new InvalidOperationException("Az ablak már nyitva van!");
+                throw new InvalidOperationException("Window is already open!");
             }
 
-            // NSWindow osztály lekérése
+            // Get NSWindow class
             IntPtr nsWindowClass = objc_getClass("NSWindow");
             if (nsWindowClass == IntPtr.Zero)
             {
-                throw new InvalidOperationException("Nem sikerült betölteni az NSWindow osztályt!");
+                throw new InvalidOperationException("Failed to load NSWindow class!");
             }
 
-            // NSString létrehozása a címhez
+            // Create NSString for the title
             IntPtr nsStringClass = objc_getClass("NSString");
             IntPtr titleString = objc_msgSend(nsStringClass, sel_registerName("alloc"));
             titleString = objc_msgSend(titleString, sel_registerName("initWithUTF8String:"),
                 Marshal.StringToHGlobalAnsi(title));
 
-            // NSWindow létrehozása
-            // macOS koordináta rendszer: bal alsó sarok (0,0), ezért 0,0-t használunk
+            // Create NSWindow
+            // macOS coordinate system: bottom-left corner is (0,0), so we use 0,0
             NSRect contentRect = new NSRect(0, 0, width, height);
 
-            // NSWindowStyleMask: Titled | Closable | Miniaturizable | Resizable
-            IntPtr styleMask = new IntPtr(1 | 2 | 4 | 8);
+            // NSWindowStyleMask: Titled | Miniaturizable | Resizable (NO Closable)
+            // The window lifecycle is managed by code, not by user interaction
+            // Titled = 1, Closable = 2 (excluded), Miniaturizable = 4, Resizable = 8
+            IntPtr styleMask = new IntPtr(1 | 4 | 8);
 
             _nsWindow = objc_msgSend(nsWindowClass, sel_registerName("alloc"));
             _nsWindow = objc_msgSend_initWithContentRect(_nsWindow, sel_registerName("initWithContentRect:styleMask:backing:defer:"),
@@ -180,27 +281,27 @@ namespace OwnVST3Host.NativeWindow
 
             if (_nsWindow == IntPtr.Zero)
             {
-                throw new InvalidOperationException("Nem sikerült létrehozni az NSWindow-t!");
+                throw new InvalidOperationException("Failed to create NSWindow!");
             }
 
-            // Cím beállítása
+            // Set title
             objc_msgSend(_nsWindow, sel_registerName("setTitle:"), titleString);
 
-            // KRITIKUS: Beállítjuk, hogy az ablak bezárásakor ne lépjen ki az alkalmazásból
+            // CRITICAL: Set window to not quit the application when closed
             objc_msgSend(_nsWindow, sel_registerName("setReleasedWhenClosed:"), false);
 
-            // KRITIKUS: Beállítjuk, hogy az ablak ne tűnjön el, amikor elveszíti a fókuszt
-            // Ez elengedhetetlen a VST plugin dropdown menük helyes működéséhez
+            // CRITICAL: Set window to not disappear when it loses focus
+            // This is essential for proper VST plugin dropdown menu behavior
             objc_msgSend(_nsWindow, sel_registerName("setHidesOnDeactivate:"), false);
 
-            // Egéresemények engedélyezése - szükséges a dropdown menük helyes tracking-jéhez
+            // Enable mouse events - required for proper dropdown menu tracking
             objc_msgSend(_nsWindow, sel_registerName("setAcceptsMouseMovedEvents:"), true);
 
-            // Ablak középre igazítása (ezt a megjelenítés ELŐTT kell meghívni)
+            // Center window (must be called BEFORE showing)
             objc_msgSend(_nsWindow, sel_registerName("center"));
 
-            // NSView létrehozása (ezt adjuk vissza a VST plugin számára)
-            // A view mérete 0,0-tól indul, mert a contentRect-hez relatív
+            // Create NSView (this is what we return to the VST plugin)
+            // View size starts at 0,0 because it's relative to contentRect
             NSRect viewRect = new NSRect(0, 0, width, height);
             IntPtr nsViewClass = objc_getClass("NSView");
             _nsView = objc_msgSend(nsViewClass, sel_registerName("alloc"));
@@ -208,14 +309,14 @@ namespace OwnVST3Host.NativeWindow
 
             if (_nsView == IntPtr.Zero)
             {
-                throw new InvalidOperationException("Nem sikerült létrehozni az NSView-t!");
+                throw new InvalidOperationException("Failed to create NSView!");
             }
 
-            // NSView hozzáadása az ablakhoz
+            // Add NSView to window
             IntPtr contentView = objc_msgSend(_nsWindow, sel_registerName("contentView"));
             objc_msgSend(contentView, sel_registerName("addSubview:"), _nsView);
 
-            // Ablak megjelenítése
+            // Show window
             objc_msgSend(_nsWindow, sel_registerName("makeKeyAndOrderFront:"), IntPtr.Zero);
         }
 
@@ -241,21 +342,22 @@ namespace OwnVST3Host.NativeWindow
 
         public IntPtr GetHandle()
         {
-            // VST3 pluginok macOS-en NSView-t várnak
+            // VST3 plugins on macOS expect an NSView
             return _nsView;
         }
 
         /// <summary>
-        /// Szinkron végrehajtás a fő szálon.
-        /// macOS-en minden AppKit/Cocoa műveletnek a fő szálon kell futnia.
+        /// Synchronous execution on the main thread.
+        /// On macOS, all AppKit/Cocoa operations must run on the main thread.
         /// </summary>
         public void Invoke(Action action) => DispatchToMainSync(action);
 
         /// <summary>
-        /// Aszinkron végrehajtás a fő szálon.
-        /// macOS-en minden AppKit/Cocoa műveletnek a fő szálon kell futnia.
-        /// A System.Threading.Timer callback ThreadPool szálról hív, ezért
-        /// GCD dispatch_async-kal marshalunk a main queue-ra.
+        /// Asynchronous execution on the main thread.
+        /// On macOS, all AppKit/Cocoa operations must run on the main thread.
+        /// Uses CFRunLoopTimer with kCFRunLoopCommonModes, which ensures
+        /// that the callback runs even when a dropdown menu is in tracking mode.
+        /// This solves VST plugin editor freezing on macOS under heavy background load.
         /// </summary>
         public void BeginInvoke(Action action) => DispatchToMainAsync(action);
 

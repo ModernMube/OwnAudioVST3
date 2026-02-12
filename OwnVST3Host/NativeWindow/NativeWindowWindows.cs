@@ -6,11 +6,11 @@ using System.Threading;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// Windows natív ablakkezelés Win32 API használatával.
-    /// Az ablak dedikált STA szálon fut saját üzenetpumpával (message loop),
-    /// hogy a VST3 pluginok cross-thread SendMessage hívásai ne okozzanak deadlockot.
-    /// Az invoke feldolgozás a message loop törzsében történik (nem WndProc-ban),
-    /// így az attached() hívás közben a rendszer képes feldolgozni a "sent messages"-eket.
+    /// Windows native window management using Win32 API.
+    /// The window runs on a dedicated STA thread with its own message pump (message loop)
+    /// to prevent deadlocks from VST3 plugin cross-thread SendMessage calls.
+    /// Invoke processing happens in the message loop body (not in WndProc),
+    /// so the system can process "sent messages" during the attached() call.
     /// </summary>
     internal class NativeWindowWindows : INativeWindow
     {
@@ -52,8 +52,17 @@ namespace OwnVST3Host.NativeWindow
 
         #region Win32 API Declarations
 
-        private const int WS_OVERLAPPEDWINDOW = 0x00CF0000;
+        // Window styles - custom combination without WS_SYSMENU (no close button)
+        private const int WS_OVERLAPPED = 0x00000000;
+        private const int WS_CAPTION = 0x00C00000;
+        private const int WS_THICKFRAME = 0x00040000;
+        private const int WS_MINIMIZEBOX = 0x00020000;
+        private const int WS_MAXIMIZEBOX = 0x00010000;
         private const int WS_VISIBLE = 0x10000000;
+
+        // Custom window style: Titled, resizable, with min/max buttons, but NO close button
+        private const int WS_VST_WINDOW = WS_OVERLAPPED | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+
         private const int CW_USEDEFAULT = unchecked((int)0x80000000);
 
         private const uint WM_SIZE = 0x0005;
@@ -160,7 +169,7 @@ namespace OwnVST3Host.NativeWindow
         {
             if (_hwnd != IntPtr.Zero)
             {
-                throw new InvalidOperationException("Az ablak már nyitva van!");
+                throw new InvalidOperationException("Window is already open!");
             }
 
             _windowCreated.Reset();
@@ -174,7 +183,7 @@ namespace OwnVST3Host.NativeWindow
 
             if (_hwnd == IntPtr.Zero)
             {
-                throw new InvalidOperationException("Nem sikerült létrehozni az ablakot a dedikált szálon!");
+                throw new InvalidOperationException("Failed to create window on dedicated thread!");
             }
         }
 
@@ -209,11 +218,13 @@ namespace OwnVST3Host.NativeWindow
                     return;
                 }
 
+                // Create window WITHOUT close button (WS_VST_WINDOW excludes WS_SYSMENU)
+                // The window lifecycle is managed by code, not by user interaction
                 _hwnd = CreateWindowEx(
                     0,
                     _windowClassName,
                     title,
-                    WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                    WS_VST_WINDOW | WS_VISIBLE,
                     CW_USEDEFAULT, CW_USEDEFAULT,
                     width, height,
                     IntPtr.Zero,
@@ -234,10 +245,10 @@ namespace OwnVST3Host.NativeWindow
 
                 _windowCreated.Set();
 
-                // Üzenetpumpa - invoke feldolgozás a loop törzsében (NEM WndProc-ban!)
-                // Ez biztosítja, hogy az attached() hívás közben a Win32 rendszer
-                // képes legyen feldolgozni a cross-thread "sent messages"-eket,
-                // mivel nem vagyunk WndProc-on belül.
+                // Message pump - invoke processing in loop body (NOT in WndProc!)
+                // This ensures that during attached() the Win32 system
+                // can process cross-thread "sent messages",
+                // since we're not inside WndProc.
                 RunMessageLoop();
             }
             catch (Exception ex)
@@ -251,8 +262,8 @@ namespace OwnVST3Host.NativeWindow
         {
             while (true)
             {
-                // 1) Invoke queue feldolgozása a message loop törzsében
-                //    (NEM WndProc-ban, így nem blokkolja a sent messages feldolgozást)
+                // 1) Process invoke queue in message loop body
+                //    (NOT in WndProc, so it doesn't block sent messages processing)
                 while (_invokeQueue.TryDequeue(out var item))
                 {
                     try
@@ -270,7 +281,7 @@ namespace OwnVST3Host.NativeWindow
                     }
                 }
 
-                // 2) Windows üzenetek feldolgozása
+                // 2) Process Windows messages
                 if (PeekMessage(out MSG msg, IntPtr.Zero, 0, 0, PM_REMOVE))
                 {
                     if (msg.message == 0x0012) // WM_QUIT
@@ -281,7 +292,7 @@ namespace OwnVST3Host.NativeWindow
                 }
                 else if (_invokeQueue.IsEmpty)
                 {
-                    // Nincs üzenet és nincs invoke - hatékonyan várakozunk
+                    // No messages and no invokes - wait efficiently
                     WaitMessage();
                 }
             }
@@ -297,14 +308,14 @@ namespace OwnVST3Host.NativeWindow
                 return;
             }
 
-            // ManualResetEvent-et használunk (nem Slim-et!),
-            // mert az STA szálon a WaitOne() COM üzeneteket is pumpál
+            // Use ManualResetEvent (not Slim!),
+            // because WaitOne() on STA thread also pumps COM messages
             using var signal = new ManualResetEvent(false);
             var item = new InvokeItem(action, signal);
             _invokeQueue.Enqueue(item);
             PostMessage(_hwnd, WM_USER_WAKE, IntPtr.Zero, IntPtr.Zero);
 
-            // STA szálon ez COM üzeneteket is feldolgoz várakozás közben
+            // On STA thread this also processes COM messages while waiting
             signal.WaitOne();
 
             if (item.Exception != null)
@@ -343,8 +354,8 @@ namespace OwnVST3Host.NativeWindow
             switch (msg)
             {
                 case WM_USER_WAKE:
-                    // Csak felébreszti a WaitMessage()-et,
-                    // a tényleges feldolgozás a message loop törzsében történik
+                    // Just wakes up WaitMessage(),
+                    // actual processing happens in message loop body
                     return IntPtr.Zero;
 
                 case WM_SIZE:
