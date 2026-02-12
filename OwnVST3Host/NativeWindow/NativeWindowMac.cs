@@ -15,7 +15,8 @@ namespace OwnVST3Host.NativeWindow
 
         // Main thread reference - on macOS all Cocoa/AppKit operations
         // must run on the main thread, otherwise undefined behavior
-        private static readonly IntPtr _mainQueue = dispatch_get_main_queue();
+        // Note: dispatch_get_main_queue() is an inline function, so we load _dispatch_main_q directly
+        private static readonly IntPtr _mainQueue;
 
         public bool IsOpen => _nsWindow != IntPtr.Zero;
 
@@ -79,8 +80,8 @@ namespace OwnVST3Host.NativeWindow
 
         #region GCD (Grand Central Dispatch) and CFRunLoop for main thread marshaling
 
-        [DllImport("/usr/lib/libSystem.B.dylib")]
-        private static extern IntPtr dispatch_get_main_queue();
+        // Note: dispatch_get_main_queue() is inline, not a real function
+        // We use dlsym to load _dispatch_main_q symbol directly
 
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern void dispatch_async_f(IntPtr queue, IntPtr context, dispatch_function_t work);
@@ -97,6 +98,16 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
         private static extern IntPtr CFRunLoopGetMain();
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CFRunLoopTimerContext
+        {
+            public IntPtr version;
+            public IntPtr info;
+            public IntPtr retain;
+            public IntPtr release;
+            public IntPtr copyDescription;
+        }
+
         [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
         private static extern IntPtr CFRunLoopTimerCreate(
             IntPtr allocator,
@@ -105,7 +116,7 @@ namespace OwnVST3Host.NativeWindow
             ulong flags,
             long order,
             CFRunLoopTimerCallBack callout,
-            IntPtr context);
+            ref CFRunLoopTimerContext context);
 
         [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
         private static extern void CFRunLoopAddTimer(IntPtr rl, IntPtr timer, IntPtr mode);
@@ -119,9 +130,6 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
         private static extern void CFRunLoopWakeUp(IntPtr rl);
 
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string cStr, uint encoding);
-
         private delegate void CFRunLoopTimerCallBack(IntPtr timer, IntPtr info);
 
         // Static delegate reference to prevent GC collection
@@ -132,21 +140,54 @@ namespace OwnVST3Host.NativeWindow
         // So our callback runs even when a dropdown menu is open (tracking mode)
         private static readonly IntPtr kCFRunLoopCommonModes;
 
-        // kCFStringEncodingUTF8
-        private const uint kCFStringEncodingUTF8 = 0x08000100;
+        // dlopen/dlsym for loading framework constants and dispatch queue
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern IntPtr dlopen(string path, int mode);
+
+        [DllImport("/usr/lib/libSystem.B.dylib")]
+        private static extern IntPtr dlsym(IntPtr handle, string symbol);
+
+        private const int RTLD_LAZY = 1;
+        private const int RTLD_DEFAULT = -2; // Special handle for default search
 
         static NativeWindowMac()
         {
-            // Create CFString for kCFRunLoopCommonModes constant
-            // This is a permanent CFString that should never be released
-            kCFRunLoopCommonModes = CFStringCreateWithCString(
-                IntPtr.Zero,
-                "kCFRunLoopCommonModes",
-                kCFStringEncodingUTF8);
-
-            if (kCFRunLoopCommonModes == IntPtr.Zero)
+            try
             {
-                throw new InvalidOperationException("Failed to create kCFRunLoopCommonModes CFString");
+                // Load _dispatch_main_q symbol (dispatch_get_main_queue is inline, not a real function)
+                // Use RTLD_DEFAULT to search in already loaded libraries
+                IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
+                if (mainQueueSymbol != IntPtr.Zero)
+                {
+                    // _dispatch_main_q is a struct, not a pointer, so we use its address directly
+                    _mainQueue = mainQueueSymbol;
+                }
+                else
+                {
+                    throw new InvalidOperationException("Failed to load _dispatch_main_q symbol");
+                }
+
+                // Load kCFRunLoopCommonModes constant directly from CoreFoundation framework
+                // This is the correct way to access built-in CFString constants
+                IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
+                if (cfHandle != IntPtr.Zero)
+                {
+                    IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
+                    if (symbolPtr != IntPtr.Zero)
+                    {
+                        // kCFRunLoopCommonModes is a CFStringRef*, so we need to dereference it
+                        kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
+                    }
+                }
+
+                if (kCFRunLoopCommonModes == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("Failed to load kCFRunLoopCommonModes constant from CoreFoundation framework");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw;
             }
         }
 
@@ -169,6 +210,16 @@ namespace OwnVST3Host.NativeWindow
             // Create GCHandle - ensures the Action is not garbage collected
             var handle = GCHandle.Alloc(action);
 
+            // Create CFRunLoopTimerContext with the GCHandle as info
+            var context = new CFRunLoopTimerContext
+            {
+                version = IntPtr.Zero,          // version 0
+                info = GCHandle.ToIntPtr(handle), // our GCHandle
+                retain = IntPtr.Zero,           // no retain callback
+                release = IntPtr.Zero,          // no release callback
+                copyDescription = IntPtr.Zero   // no description callback
+            };
+
             // Create one-shot timer that fires immediately on the main RunLoop
             // fireDate: current time (immediately)
             // interval: 0 (one-shot, does not repeat)
@@ -180,7 +231,7 @@ namespace OwnVST3Host.NativeWindow
                 0,                              // flags
                 0,                              // order
                 TimerCallbackDelegate,          // callback (use static delegate to prevent GC)
-                GCHandle.ToIntPtr(handle));     // context (GCHandle pointer)
+                ref context);                   // context struct
 
             if (timer == IntPtr.Zero)
             {
@@ -230,10 +281,6 @@ namespace OwnVST3Host.NativeWindow
             {
                 var action = (Action)handle.Target!;
                 action();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[NativeWindowMac] Error in TimerCallback: {ex.Message}");
             }
             finally
             {
