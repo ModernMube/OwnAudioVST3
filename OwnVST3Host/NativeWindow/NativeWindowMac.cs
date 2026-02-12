@@ -119,20 +119,35 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
         private static extern void CFRunLoopWakeUp(IntPtr rl);
 
+        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
+        private static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string cStr, uint encoding);
+
         private delegate void CFRunLoopTimerCallBack(IntPtr timer, IntPtr info);
+
+        // Static delegate reference to prevent GC collection
+        private static readonly CFRunLoopTimerCallBack TimerCallbackDelegate = TimerCallback;
 
         // kCFRunLoopCommonModes constant (CFStringRef)
         // This mode set contains both NSDefaultRunLoopMode AND NSEventTrackingRunLoopMode
         // So our callback runs even when a dropdown menu is open (tracking mode)
         private static readonly IntPtr kCFRunLoopCommonModes;
 
+        // kCFStringEncodingUTF8
+        private const uint kCFStringEncodingUTF8 = 0x08000100;
+
         static NativeWindowMac()
         {
-            // Get kCFRunLoopCommonModes constant from Objective-C runtime
-            // This is the CFStringRef representation of the "kCFRunLoopCommonModes" string
-            IntPtr nsStringClass = objc_getClass("NSString");
-            kCFRunLoopCommonModes = objc_msgSend(nsStringClass, sel_registerName("stringWithUTF8String:"),
-                Marshal.StringToHGlobalAnsi("kCFRunLoopCommonModes"));
+            // Create CFString for kCFRunLoopCommonModes constant
+            // This is a permanent CFString that should never be released
+            kCFRunLoopCommonModes = CFStringCreateWithCString(
+                IntPtr.Zero,
+                "kCFRunLoopCommonModes",
+                kCFStringEncodingUTF8);
+
+            if (kCFRunLoopCommonModes == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("Failed to create kCFRunLoopCommonModes CFString");
+            }
         }
 
         private static bool IsMainThread() => pthread_main_np() != 0;
@@ -164,7 +179,7 @@ namespace OwnVST3Host.NativeWindow
                 0,                              // interval (0 = one-shot)
                 0,                              // flags
                 0,                              // order
-                TimerCallback,                  // callback
+                TimerCallbackDelegate,          // callback (use static delegate to prevent GC)
                 GCHandle.ToIntPtr(handle));     // context (GCHandle pointer)
 
             if (timer == IntPtr.Zero)
@@ -261,10 +276,20 @@ namespace OwnVST3Host.NativeWindow
             }
 
             // Create NSString for the title
-            IntPtr nsStringClass = objc_getClass("NSString");
-            IntPtr titleString = objc_msgSend(nsStringClass, sel_registerName("alloc"));
-            titleString = objc_msgSend(titleString, sel_registerName("initWithUTF8String:"),
-                Marshal.StringToHGlobalAnsi(title));
+            IntPtr titleString = IntPtr.Zero;
+            IntPtr utf8Ptr = IntPtr.Zero;
+            try
+            {
+                utf8Ptr = Marshal.StringToHGlobalAnsi(title);
+                IntPtr nsStringClass = objc_getClass("NSString");
+                titleString = objc_msgSend(nsStringClass, sel_registerName("alloc"));
+                titleString = objc_msgSend(titleString, sel_registerName("initWithUTF8String:"), utf8Ptr);
+            }
+            finally
+            {
+                if (utf8Ptr != IntPtr.Zero)
+                    Marshal.FreeHGlobal(utf8Ptr);
+            }
 
             // Create NSWindow
             // macOS coordinate system: bottom-left corner is (0,0), so we use 0,0
@@ -286,6 +311,10 @@ namespace OwnVST3Host.NativeWindow
 
             // Set title
             objc_msgSend(_nsWindow, sel_registerName("setTitle:"), titleString);
+
+            // Release the title string (setTitle: retains it)
+            if (titleString != IntPtr.Zero)
+                objc_msgSend(titleString, sel_registerName("release"));
 
             // CRITICAL: Set window to not quit the application when closed
             objc_msgSend(_nsWindow, sel_registerName("setReleasedWhenClosed:"), false);
