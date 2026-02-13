@@ -53,6 +53,9 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, bool arg1);
 
+        [DllImport("/usr/lib/libobjc.dylib")]
+        private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, long arg1);
+
         [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
         private static extern IntPtr objc_msgSend_initWithContentRect(IntPtr receiver, IntPtr selector, NSRect rect, IntPtr styleMask, IntPtr backing, IntPtr defer);
 
@@ -373,6 +376,13 @@ namespace OwnVST3Host.NativeWindow
             // Enable mouse events - required for proper dropdown menu tracking
             objc_msgSend(_nsWindow, sel_registerName("setAcceptsMouseMovedEvents:"), true);
 
+            // CRITICAL: Do not ignore mouse events - allow child windows/menus to receive them
+            objc_msgSend(_nsWindow, sel_registerName("setIgnoresMouseEvents:"), false);
+
+            // Set window level to normal (NSNormalWindowLevel = 0)
+            // This ensures popup menus can appear above the window
+            objc_msgSend(_nsWindow, sel_registerName("setLevel:"), 0L);
+
             // Center window (must be called BEFORE showing)
             objc_msgSend(_nsWindow, sel_registerName("center"));
 
@@ -388,9 +398,9 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException("Failed to create NSView!");
             }
 
-            // Add NSView to window
-            IntPtr contentView = objc_msgSend(_nsWindow, sel_registerName("contentView"));
-            objc_msgSend(contentView, sel_registerName("addSubview:"), _nsView);
+            // CRITICAL: Set NSView as the window's content view (not as a subview!)
+            // This ensures proper window hierarchy for plugin popup windows/menus
+            objc_msgSend(_nsWindow, sel_registerName("setContentView:"), _nsView);
 
             // Show window
             objc_msgSend(_nsWindow, sel_registerName("makeKeyAndOrderFront:"), IntPtr.Zero);
