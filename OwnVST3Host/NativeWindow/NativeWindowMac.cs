@@ -318,6 +318,27 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException("Window is already open!");
             }
 
+            // CRITICAL FIX: On macOS, ALL AppKit/Cocoa operations (including NSWindow creation)
+            // MUST run on the main thread (pthread_main_np() == 1).
+            // If called from Avalonia UI thread (which may NOT be the macOS main thread),
+            // we marshal to the main thread using dispatch_sync.
+            // This fixes crash when opening VST editor during playback.
+            if (!IsMainThread())
+            {
+                // Marshal to main thread synchronously
+                DispatchToMainSync(() => OpenOnMainThread(title, width, height));
+                return;
+            }
+
+            // Already on main thread, proceed directly
+            OpenOnMainThread(title, width, height);
+        }
+
+        /// <summary>
+        /// Internal Open implementation - MUST be called on macOS main thread only.
+        /// </summary>
+        private void OpenOnMainThread(string title, int width, int height)
+        {
             // Get NSWindow class
             IntPtr nsWindowClass = objc_getClass("NSWindow");
             if (nsWindowClass == IntPtr.Zero)
@@ -407,6 +428,21 @@ namespace OwnVST3Host.NativeWindow
         }
 
         public void Close()
+        {
+            // CRITICAL FIX: Cocoa operations must run on main thread
+            if (!IsMainThread())
+            {
+                DispatchToMainSync(CloseOnMainThread);
+                return;
+            }
+
+            CloseOnMainThread();
+        }
+
+        /// <summary>
+        /// Internal Close implementation - MUST be called on macOS main thread only.
+        /// </summary>
+        private void CloseOnMainThread()
         {
             if (_nsWindow != IntPtr.Zero)
             {
