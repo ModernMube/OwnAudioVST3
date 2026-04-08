@@ -160,6 +160,17 @@ namespace OwnVST3Host
         {
             CheckDisposed();
 
+            // Guard: ha a plugin eltérő csatornaszámot fogadott el, bypass
+            int actualIn  = ActualInputChannels;
+            int actualOut = ActualOutputChannels;
+            if (numChannels != actualIn || numChannels != actualOut)
+            {
+                int copyChannels = Math.Min(inputs.Length, outputs.Length);
+                for (int ch = 0; ch < copyChannels; ch++)
+                    inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
+                return false;
+            }
+
             // Convert to interop structure
             AudioBufferC buffer = new AudioBufferC();
 
@@ -307,6 +318,57 @@ namespace OwnVST3Host
                 IntPtr infoPtr = _getPluginInfoFunc(_pluginHandle);
                 return Marshal.PtrToStringAnsi(infoPtr);
             }
+        }
+
+        /// <summary>
+        /// Returns the actual input channel count accepted by the plugin after setBusArrangement
+        /// </summary>
+        public int ActualInputChannels
+        {
+            get
+            {
+                CheckDisposed();
+                return _getActualInputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
+            }
+        }
+
+        /// <summary>
+        /// Returns the actual output channel count accepted by the plugin after setBusArrangement
+        /// </summary>
+        public int ActualOutputChannels
+        {
+            get
+            {
+                CheckDisposed();
+                return _getActualOutputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
+            }
+        }
+
+        /// <summary>
+        /// Sets the playback tempo forwarded to the plugin via ProcessContext
+        /// </summary>
+        public void SetTempo(double bpm)
+        {
+            CheckDisposed();
+            _setTempoFunc?.Invoke(_pluginHandle, bpm);
+        }
+
+        /// <summary>
+        /// Sets the transport playing state forwarded to the plugin via ProcessContext
+        /// </summary>
+        public void SetTransportState(bool isPlaying)
+        {
+            CheckDisposed();
+            _setTransportStateFunc?.Invoke(_pluginHandle, isPlaying);
+        }
+
+        /// <summary>
+        /// Resets the transport sample position counter (e.g. on Stop)
+        /// </summary>
+        public void ResetTransportPosition()
+        {
+            CheckDisposed();
+            _resetTransportPositionFunc?.Invoke(_pluginHandle);
         }
 
         /// <summary>

@@ -32,6 +32,11 @@ namespace OwnVST3Host
         private delegate void VST3Plugin_ClearStringCacheDelegate();
         private delegate void VST3Plugin_ProcessIdleDelegate(IntPtr handle);
         private delegate bool VST3Plugin_IsEditorOpenDelegate(IntPtr handle);
+        private delegate int VST3Plugin_GetActualInputChannelsDelegate(IntPtr handle);
+        private delegate int VST3Plugin_GetActualOutputChannelsDelegate(IntPtr handle);
+        private delegate void VST3Plugin_SetTempoDelegate(IntPtr handle, double bpm);
+        private delegate void VST3Plugin_SetTransportStateDelegate(IntPtr handle, bool isPlaying);
+        private delegate void VST3Plugin_ResetTransportPositionDelegate(IntPtr handle);
 
         #endregion
 
@@ -62,6 +67,11 @@ namespace OwnVST3Host
             _clearStringCacheFunc = GetDelegate<VST3Plugin_ClearStringCacheDelegate>("VST3Plugin_ClearStringCache");
             _processIdleFunc = TryGetDelegate<VST3Plugin_ProcessIdleDelegate>("VST3Plugin_ProcessIdle"); // Optional - may not exist in older DLLs
             _isEditorOpenFunc = TryGetDelegate<VST3Plugin_IsEditorOpenDelegate>("VST3Plugin_IsEditorOpen"); // Optional - may not exist in older DLLs
+            _getActualInputChannelsFunc = TryGetDelegate<VST3Plugin_GetActualInputChannelsDelegate>("VST3Plugin_GetActualInputChannels");
+            _getActualOutputChannelsFunc = TryGetDelegate<VST3Plugin_GetActualOutputChannelsDelegate>("VST3Plugin_GetActualOutputChannels");
+            _setTempoFunc = TryGetDelegate<VST3Plugin_SetTempoDelegate>("VST3Plugin_SetTempo");
+            _setTransportStateFunc = TryGetDelegate<VST3Plugin_SetTransportStateDelegate>("VST3Plugin_SetTransportState");
+            _resetTransportPositionFunc = TryGetDelegate<VST3Plugin_ResetTransportPositionDelegate>("VST3Plugin_ResetTransportPosition");
         }
 
         private T GetDelegate<T>(string functionName) where T : Delegate
