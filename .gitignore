@@ -39,6 +39,7 @@ bld/
 #wwwroot/
 .DS_Store
 .idea/
+.claude/
 Thumbs.db
 OwnVST3EditorDemo/.DS_Store
 

@@ -25,6 +25,7 @@ namespace OwnVST3Host
         private delegate bool VST3Plugin_ProcessMidiDelegate(IntPtr handle, [In] MidiEventC[] events, int eventCount);
         private delegate bool VST3Plugin_IsInstrumentDelegate(IntPtr handle);
         private delegate bool VST3Plugin_IsEffectDelegate(IntPtr handle);
+        private delegate bool VST3Plugin_IsMidiOnlyDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetNameDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetVendorDelegate(IntPtr handle);
         private delegate IntPtr VST3Plugin_GetVersionDelegate(IntPtr handle);
@@ -60,6 +61,7 @@ namespace OwnVST3Host
             _processMidiFunc = GetDelegate<VST3Plugin_ProcessMidiDelegate>("VST3Plugin_ProcessMidi");
             _isInstrumentFunc = GetDelegate<VST3Plugin_IsInstrumentDelegate>("VST3Plugin_IsInstrument");
             _isEffectFunc = GetDelegate<VST3Plugin_IsEffectDelegate>("VST3Plugin_IsEffect");
+            _isMidiOnlyFunc = TryGetDelegate<VST3Plugin_IsMidiOnlyDelegate>("VST3Plugin_IsMidiOnly");
             _getNameFunc = GetDelegate<VST3Plugin_GetNameDelegate>("VST3Plugin_GetName");
             _getVendorFunc = GetDelegate<VST3Plugin_GetVendorDelegate>("VST3Plugin_GetVendor");
             _getVersionFunc = TryGetDelegate<VST3Plugin_GetVersionDelegate>("VST3Plugin_GetVersion"); // Optional - may not exist in older DLLs

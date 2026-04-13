@@ -38,6 +38,7 @@ namespace OwnVST3Host
         private VST3Plugin_ProcessMidiDelegate _processMidiFunc;
         private VST3Plugin_IsInstrumentDelegate _isInstrumentFunc;
         private VST3Plugin_IsEffectDelegate _isEffectFunc;
+        private VST3Plugin_IsMidiOnlyDelegate? _isMidiOnlyFunc;
         private VST3Plugin_GetNameDelegate _getNameFunc;
         private VST3Plugin_GetVendorDelegate _getVendorFunc;
         private VST3Plugin_GetVersionDelegate _getVersionFunc;

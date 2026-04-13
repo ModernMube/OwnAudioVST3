@@ -215,6 +215,18 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Sends a single MIDI message to the plugin
+        /// </summary>
+        /// <param name="status">Status byte (e.g. 0x90 = Note On, 0x80 = Note Off)</param>
+        /// <param name="data1">First data byte (e.g. note number)</param>
+        /// <param name="data2">Second data byte (e.g. velocity)</param>
+        /// <returns>True if successful</returns>
+        public bool SendMidiEvent(byte status, byte data1, byte data2)
+        {
+            return ProcessMidi(new[] { new MidiEvent { Status = status, Data1 = data1, Data2 = data2 } });
+        }
+
+        /// <summary>
         /// Processes MIDI events
         /// </summary>
         /// <param name="events">MIDI events</param>
@@ -243,7 +255,20 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Checks if the plugin is an instrument
+        /// Checks if the plugin accepts MIDI events but has no audio output (e.g. MIDI effect, arpeggiator).
+        /// Returns false if the native library does not support this query (older DLL versions).
+        /// </summary>
+        public bool IsMidiOnly
+        {
+            get
+            {
+                CheckDisposed();
+                return _isMidiOnlyFunc?.Invoke(_pluginHandle) ?? false;
+            }
+        }
+
+        /// <summary>
+        /// Checks if the plugin is an instrument (MIDI input + audio output)
         /// </summary>
         public bool IsInstrument
         {

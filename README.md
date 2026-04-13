@@ -15,7 +15,7 @@ A cross-platform C# wrapper for VST3 plugins with built-in visual editor support
 - **VST3 Plugin Loading** - Load and control VST3 instruments and effects
 - **Cross-Platform Editors** - Display plugin UIs on Windows, macOS, and Linux
 - **Parameter Control** - Get/set plugin parameters programmatically
-- **MIDI Support** - Send MIDI events to instruments
+- **MIDI Support** - Send MIDI events to instruments and MIDI-only plugins
 - **Audio Processing** - Process audio buffers in real-time
 - **Native Performance** - Uses native C++ library for optimal performance
 
@@ -57,9 +57,14 @@ if (plugin.HasEditor())
 // Get plugin information
 Console.WriteLine($"Name: {plugin.Name}");
 Console.WriteLine($"Vendor: {plugin.Vendor}");
-Console.WriteLine($"Type: {(plugin.IsInstrument ? "Instrument" : "Effect")}");
 
-// Process audio
+string type = plugin.IsInstrument ? "Instrument"
+            : plugin.IsEffect    ? "Effect"
+            : plugin.IsMidiOnly  ? "MIDI Only"
+            : "Unknown";
+Console.WriteLine($"Type: {type}");
+
+// Process audio (not needed for MIDI-only plugins)
 plugin.ProcessAudio(inputBuffer, outputBuffer, sampleCount);
 
 // Clean up
@@ -87,8 +92,11 @@ plugin.Dispose();
 - `GetParameterInfo(index)` - Get parameter metadata
 
 ### MIDI
-- `SendMidiEvent(status, data1, data2)` - Send MIDI message
-- `IsInstrument` - Check if plugin is a MIDI instrument
+- `SendMidiEvent(status, data1, data2)` - Send a single MIDI message
+- `ProcessMidi(MidiEvent[])` - Send multiple MIDI messages in one call
+- `IsInstrument` - `true` if plugin accepts MIDI and produces audio (e.g. synthesizer)
+- `IsEffect` - `true` if plugin processes audio (e.g. reverb, compressor)
+- `IsMidiOnly` - `true` if plugin accepts MIDI but has no audio output (e.g. MIDI effect, arpeggiator)
 
 ## Platform Support
 

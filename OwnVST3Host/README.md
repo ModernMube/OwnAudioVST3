@@ -10,7 +10,7 @@ A powerful, cross-platform C# wrapper for VST3 plugins with built-in visual edit
 - **🎹 Full VST3 Support** - Load and control VST3 instruments and effects with complete API coverage
 - **🖥️ Cross-Platform Editors** - Display plugin UIs seamlessly on Windows, macOS, and Linux using Avalonia
 - **🎛️ Parameter Control** - Get, set, and monitor plugin parameters programmatically
-- **🎵 MIDI Support** - Send MIDI events to VST3 instruments
+- **🎵 MIDI Support** - Send MIDI events to VST3 instruments and MIDI-only plugins (effects, arpeggiators)
 - **🔊 Real-Time Audio Processing** - Process audio buffers with native performance
 - **🚀 Native Performance** - Uses optimized C++ library for minimal overhead
 - **📦 Zero Configuration** - Automatic platform detection and native library loading
@@ -48,7 +48,12 @@ plugin.Initialize(sampleRate: 44100, bufferSize: 512);
 // Get plugin information
 Console.WriteLine($"Name: {plugin.Name}");
 Console.WriteLine($"Vendor: {plugin.Vendor}");
-Console.WriteLine($"Type: {(plugin.IsInstrument ? "Instrument" : "Effect")}");
+
+string type = plugin.IsInstrument ? "Instrument"
+            : plugin.IsEffect    ? "Effect"
+            : plugin.IsMidiOnly  ? "MIDI Only"
+            : "Unknown";
+Console.WriteLine($"Type: {type}");
 
 // Clean up
 plugin.Dispose();
@@ -114,6 +119,24 @@ plugin.SendMidiEvent(
     data1: 60,     // Middle C
     data2: 0       // Velocity
 );
+
+// Send a Control Change message (e.g. Sustain pedal)
+plugin.SendMidiEvent(0xB0, 64, 127);
+```
+
+### Working with MIDI-Only Plugins
+
+MIDI-only plugins (e.g. MIDI effects, arpeggiators, chord generators) accept MIDI input but produce no audio output. Use `ProcessMidi` to drive them — no audio buffers are needed.
+
+```csharp
+plugin.LoadPlugin("/path/to/midi-effect.vst3");
+plugin.Initialize(44100, 512);
+
+if (plugin.IsMidiOnly)
+{
+    // No audio processing needed — just send MIDI
+    plugin.SendMidiEvent(0x90, 60, 100); // Note On
+}
 ```
 
 ### Finding VST3 Plugins
@@ -178,8 +201,16 @@ Native libraries are automatically selected based on your runtime platform and a
 
 | Method | Description |
 |--------|-------------|
-| `SendMidiEvent(status, data1, data2)` | Send a MIDI message to the plugin |
-| `IsInstrument` | Check if the plugin is a MIDI instrument |
+| `SendMidiEvent(status, data1, data2)` | Send a single MIDI message to the plugin |
+| `ProcessMidi(MidiEvent[])` | Send multiple MIDI messages in one call |
+
+### Plugin Type
+
+| Property | Description |
+|----------|-------------|
+| `IsInstrument` | `true` if the plugin accepts MIDI and produces audio (e.g. synthesizer) |
+| `IsEffect` | `true` if the plugin processes audio (e.g. reverb, compressor) |
+| `IsMidiOnly` | `true` if the plugin accepts MIDI but has no audio output (e.g. MIDI effect, arpeggiator) |
 
 ### Plugin Information
 
@@ -188,8 +219,6 @@ Native libraries are automatically selected based on your runtime platform and a
 | `Name` | Plugin name |
 | `Vendor` | Plugin vendor/manufacturer |
 | `Version` | Plugin version string |
-| `IsInstrument` | Whether the plugin is an instrument |
-| `IsEffect` | Whether the plugin is an effect |
 
 ## Requirements
 
