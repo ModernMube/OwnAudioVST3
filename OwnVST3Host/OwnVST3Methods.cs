@@ -460,6 +460,37 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Processes audio using pre-pinned buffer pointers – zero allocations in the hot path.
+        /// The caller (VST3EffectProcessor) is responsible for pinning the arrays in advance
+        /// and keeping the GCHandles alive for the duration of processing.
+        /// Returns false when the channel count does not match what the plugin accepted
+        /// (caller must handle bypass in that case).
+        /// </summary>
+        public bool ProcessAudioPinned(
+            IntPtr inputsPinnedArray,
+            IntPtr outputsPinnedArray,
+            int numChannels,
+            int numSamples)
+        {
+            CheckDisposed();
+
+            int actualIn  = _getActualInputChannelsFunc?.Invoke(_pluginHandle)  ?? 2;
+            int actualOut = _getActualOutputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
+            if (numChannels != actualIn || numChannels != actualOut)
+                return false; // caller handles bypass
+
+            AudioBufferC buffer = new AudioBufferC
+            {
+                inputs      = inputsPinnedArray,
+                outputs     = outputsPinnedArray,
+                numChannels = numChannels,
+                numSamples  = numSamples
+            };
+
+            return _processAudioFunc(_pluginHandle, ref buffer);
+        }
+
+        /// <summary>
         /// Flushes the MIDI SPSC queue for IsMidiOnly plugins by issuing a
         /// silent ProcessAudio call with 0 samples. This is required because
         /// IsMidiOnly plugins have no audio output bus and ProcessAudio would
