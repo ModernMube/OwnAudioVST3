@@ -332,6 +332,12 @@ namespace OwnVST3Host
             {
                 if (_pluginHandle != IntPtr.Zero)
                 {
+                    // Must call _destroyFunc BEFORE freeing the library handle.
+                    // Without this, the native C++ plugin object (and its internal
+                    // threads, COM state, VST3 infrastructure) is never freed.
+                    // Skipping this call was the root cause of accumulated native
+                    // instances causing 2–3 s startup lag after repeated effect switches.
+                    _destroyFunc?.Invoke(_pluginHandle);
                     _pluginHandle = IntPtr.Zero;
                 }
 
