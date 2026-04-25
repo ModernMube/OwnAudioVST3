@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace OwnVST3Host
 {
@@ -244,14 +244,26 @@ namespace OwnVST3Host
             {
                 eventsC[i] = new MidiEventC
                 {
-                    status = events[i].Status,
-                    data1 = events[i].Data1,
-                    data2 = events[i].Data2,
+                    status = events[i].Status,   // int (matches C++ int status)
+                    data1  = events[i].Data1,    // int (matches C++ int data1)
+                    data2  = events[i].Data2,    // int (matches C++ int data2)
                     sampleOffset = events[i].SampleOffset
                 };
             }
 
-            return _processMidiFunc(_pluginHandle, eventsC, events.Length);
+            bool result = _processMidiFunc(_pluginHandle, eventsC, events.Length);
+
+            // IsMidiOnly plugins have no audio output bus, so ProcessAudio is never called
+            // by the host. Without a processAudio() call the MIDI events queued into the
+            // lock-free SPSC buffer would never reach the plugin's process() method.
+            // We therefore flush the queue here with a minimal silent audio block (0 samples)
+            // so the plugin receives the events in the very same render call.
+            if (result && (_isMidiOnlyFunc?.Invoke(_pluginHandle) ?? false))
+            {
+                FlushMidiForMidiOnlyPlugin();
+            }
+
+            return result;
         }
 
         /// <summary>
@@ -445,6 +457,44 @@ namespace OwnVST3Host
             }
 
             return parameters;
+        }
+
+        /// <summary>
+        /// Flushes the MIDI SPSC queue for IsMidiOnly plugins by issuing a
+        /// silent ProcessAudio call with 0 samples. This is required because
+        /// IsMidiOnly plugins have no audio output bus and ProcessAudio would
+        /// otherwise never be called, leaving queued events undelivered.
+        /// </summary>
+        private void FlushMidiForMidiOnlyPlugin()
+        {
+            // A single silent float sample – we just need a valid non-null pointer.
+            // numSamples = 0 signals a "flush" call to the plugin (VST3-compliant).
+            float[] silentSample = new float[1];
+            GCHandle silentHandle = GCHandle.Alloc(silentSample, GCHandleType.Pinned);
+            try
+            {
+                IntPtr[] ptrs = new IntPtr[] { silentHandle.AddrOfPinnedObject() };
+                GCHandle ptrsHandle = GCHandle.Alloc(ptrs, GCHandleType.Pinned);
+                try
+                {
+                    AudioBufferC buf = new AudioBufferC
+                    {
+                        inputs     = ptrsHandle.AddrOfPinnedObject(),
+                        outputs    = ptrsHandle.AddrOfPinnedObject(),
+                        numChannels = 1,
+                        numSamples  = 0   // flush: deliver queued events, process no audio
+                    };
+                    _processAudioFunc(_pluginHandle, ref buf);
+                }
+                finally
+                {
+                    ptrsHandle.Free();
+                }
+            }
+            finally
+            {
+                silentHandle.Free();
+            }
         }
 
         private void CheckDisposed()

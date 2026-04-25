@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace OwnVST3Host
 {
@@ -32,10 +32,10 @@ namespace OwnVST3Host
         [StructLayout(LayoutKind.Sequential)]
         public struct MidiEventC
         {
-            public byte status;
-            public byte data1;
-            public byte data2;
-            public int sampleOffset;
+            public int status;       // int, matches C++ MidiEvent: int status
+            public int data1;        // int, matches C++ MidiEvent: int data1
+            public int data2;        // int, matches C++ MidiEvent: int data2
+            public int sampleOffset; // int, matches C++ MidiEvent: int sampleOffset
         }
 
         #endregion
