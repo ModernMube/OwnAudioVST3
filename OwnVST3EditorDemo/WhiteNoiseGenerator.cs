@@ -28,6 +28,10 @@ namespace OwnVST3EditorDemo
         {
             if (IsPlaying || _disposed) return;
 
+            // Notify the plugin that transport is playing so ProcessContext.state
+            // is set correctly and the editor UI reacts to playback.
+            _plugin.SetTransportState(true);
+
             _cancellationTokenSource = new CancellationTokenSource();
             _processingTask = Task.Run(() => ProcessAudioLoop(_cancellationTokenSource.Token));
         }
@@ -41,6 +45,10 @@ namespace OwnVST3EditorDemo
             _cancellationTokenSource?.Dispose();
             _cancellationTokenSource = null;
             _processingTask = null;
+
+            // Reset transport state so the plugin knows playback stopped.
+            _plugin.SetTransportState(false);
+            _plugin.ResetTransportPosition();
         }
 
         private void ProcessAudioLoop(CancellationToken cancellationToken)

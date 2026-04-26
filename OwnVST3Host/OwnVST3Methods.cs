@@ -160,28 +160,38 @@ namespace OwnVST3Host
         {
             CheckDisposed();
 
-            // Guard: ha a plugin eltérő csatornaszámot fogadott el, bypass
+            // Clamp the channel count to what the plugin's primary bus actually accepts.
+            // Previously this guard completely bypassed the plugin on any mismatch
+            // (e.g. stereo host sending 2 ch to a plugin whose actualInputChannels was
+            // 4 because sidechain buses were erroneously summed in the native layer).
+            // Now we send only as many channels as the plugin declared for bus 0.
             int actualIn  = ActualInputChannels;
             int actualOut = ActualOutputChannels;
-            if (numChannels != actualIn || numChannels != actualOut)
+
+            // Channels to pass to the plugin: limited to what the plugin supports and
+            // what the caller provided.
+            int pluginChannels = Math.Min(numChannels, Math.Min(actualIn, actualOut));
+
+            if (pluginChannels <= 0)
             {
+                // Plugin has no audio buses at all – simple pass-through.
                 int copyChannels = Math.Min(inputs.Length, outputs.Length);
                 for (int ch = 0; ch < copyChannels; ch++)
                     inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
                 return false;
             }
 
-            // Convert to interop structure
+            // Convert to interop structure using the clamped channel count.
             AudioBufferC buffer = new AudioBufferC();
 
-            // Create appropriate pinned GCHandles for the data
-            GCHandle[] inputHandles = new GCHandle[numChannels];
-            GCHandle[] outputHandles = new GCHandle[numChannels];
+            // Pin only the channels the plugin can actually process.
+            GCHandle[] inputHandles = new GCHandle[pluginChannels];
+            GCHandle[] outputHandles = new GCHandle[pluginChannels];
 
-            IntPtr[] inputPtrs = new IntPtr[numChannels];
-            IntPtr[] outputPtrs = new IntPtr[numChannels];
+            IntPtr[] inputPtrs = new IntPtr[pluginChannels];
+            IntPtr[] outputPtrs = new IntPtr[pluginChannels];
 
-            for (int i = 0; i < numChannels; i++)
+            for (int i = 0; i < pluginChannels; i++)
             {
                 inputHandles[i] = GCHandle.Alloc(inputs[i], GCHandleType.Pinned);
                 outputHandles[i] = GCHandle.Alloc(outputs[i], GCHandleType.Pinned);
@@ -196,7 +206,7 @@ namespace OwnVST3Host
 
             buffer.inputs = inputsHandle.AddrOfPinnedObject();
             buffer.outputs = outputsHandle.AddrOfPinnedObject();
-            buffer.numChannels = numChannels;
+            buffer.numChannels = pluginChannels;
             buffer.numSamples = numSamples;
 
             bool result = _processAudioFunc(_pluginHandle, ref buffer);
@@ -205,11 +215,15 @@ namespace OwnVST3Host
             inputsHandle.Free();
             outputsHandle.Free();
 
-            for (int i = 0; i < numChannels; i++)
+            for (int i = 0; i < pluginChannels; i++)
             {
                 inputHandles[i].Free();
                 outputHandles[i].Free();
             }
+
+            // Pass-through any extra channels that the plugin did not process.
+            for (int ch = pluginChannels; ch < Math.Min(numChannels, outputs.Length); ch++)
+                inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
 
             return result;
         }
@@ -244,26 +258,14 @@ namespace OwnVST3Host
             {
                 eventsC[i] = new MidiEventC
                 {
-                    status = events[i].Status,   // int (matches C++ int status)
-                    data1  = events[i].Data1,    // int (matches C++ int data1)
-                    data2  = events[i].Data2,    // int (matches C++ int data2)
+                    status = events[i].Status,
+                    data1 = events[i].Data1,
+                    data2 = events[i].Data2,
                     sampleOffset = events[i].SampleOffset
                 };
             }
 
-            bool result = _processMidiFunc(_pluginHandle, eventsC, events.Length);
-
-            // IsMidiOnly plugins have no audio output bus, so ProcessAudio is never called
-            // by the host. Without a processAudio() call the MIDI events queued into the
-            // lock-free SPSC buffer would never reach the plugin's process() method.
-            // We therefore flush the queue here with a minimal silent audio block (0 samples)
-            // so the plugin receives the events in the very same render call.
-            if (result && (_isMidiOnlyFunc?.Invoke(_pluginHandle) ?? false))
-            {
-                FlushMidiForMidiOnlyPlugin();
-            }
-
-            return result;
+            return _processMidiFunc(_pluginHandle, eventsC, events.Length);
         }
 
         /// <summary>
@@ -457,75 +459,6 @@ namespace OwnVST3Host
             }
 
             return parameters;
-        }
-
-        /// <summary>
-        /// Processes audio using pre-pinned buffer pointers – zero allocations in the hot path.
-        /// The caller (VST3EffectProcessor) is responsible for pinning the arrays in advance
-        /// and keeping the GCHandles alive for the duration of processing.
-        /// Returns false when the channel count does not match what the plugin accepted
-        /// (caller must handle bypass in that case).
-        /// </summary>
-        public bool ProcessAudioPinned(
-            IntPtr inputsPinnedArray,
-            IntPtr outputsPinnedArray,
-            int numChannels,
-            int numSamples)
-        {
-            CheckDisposed();
-
-            int actualIn  = _getActualInputChannelsFunc?.Invoke(_pluginHandle)  ?? 2;
-            int actualOut = _getActualOutputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
-            if (numChannels != actualIn || numChannels != actualOut)
-                return false; // caller handles bypass
-
-            AudioBufferC buffer = new AudioBufferC
-            {
-                inputs      = inputsPinnedArray,
-                outputs     = outputsPinnedArray,
-                numChannels = numChannels,
-                numSamples  = numSamples
-            };
-
-            return _processAudioFunc(_pluginHandle, ref buffer);
-        }
-
-        /// <summary>
-        /// Flushes the MIDI SPSC queue for IsMidiOnly plugins by issuing a
-        /// silent ProcessAudio call with 0 samples. This is required because
-        /// IsMidiOnly plugins have no audio output bus and ProcessAudio would
-        /// otherwise never be called, leaving queued events undelivered.
-        /// </summary>
-        private void FlushMidiForMidiOnlyPlugin()
-        {
-            // A single silent float sample – we just need a valid non-null pointer.
-            // numSamples = 0 signals a "flush" call to the plugin (VST3-compliant).
-            float[] silentSample = new float[1];
-            GCHandle silentHandle = GCHandle.Alloc(silentSample, GCHandleType.Pinned);
-            try
-            {
-                IntPtr[] ptrs = new IntPtr[] { silentHandle.AddrOfPinnedObject() };
-                GCHandle ptrsHandle = GCHandle.Alloc(ptrs, GCHandleType.Pinned);
-                try
-                {
-                    AudioBufferC buf = new AudioBufferC
-                    {
-                        inputs     = ptrsHandle.AddrOfPinnedObject(),
-                        outputs    = ptrsHandle.AddrOfPinnedObject(),
-                        numChannels = 1,
-                        numSamples  = 0   // flush: deliver queued events, process no audio
-                    };
-                    _processAudioFunc(_pluginHandle, ref buf);
-                }
-                finally
-                {
-                    ptrsHandle.Free();
-                }
-            }
-            finally
-            {
-                silentHandle.Free();
-            }
         }
 
         private void CheckDisposed()
