@@ -11,16 +11,7 @@ namespace OwnVST3Host.NativeWindow
     {
         private IntPtr _nsWindow = IntPtr.Zero;
         private IntPtr _nsView = IntPtr.Zero;
-        private IntPtr _observerInstance = IntPtr.Zero;
         private bool _disposed = false;
-
-        // Static ObjC delegate class + callback registry (main-thread-only access, no locking needed)
-        private static IntPtr _observerClass = IntPtr.Zero;
-        private static WindowWillCloseDelegate? _closeCallbackHolder; // prevents GC collection
-        private static readonly Dictionary<IntPtr, Action> _closeCallbacks = new();
-
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void WindowWillCloseDelegate(IntPtr self, IntPtr cmd, IntPtr notification);
 
         // Main thread reference - on macOS all Cocoa/AppKit operations
         // must run on the main thread, otherwise undefined behavior
@@ -70,15 +61,6 @@ namespace OwnVST3Host.NativeWindow
 
         [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
         private static extern IntPtr objc_msgSend_initWithFrame(IntPtr receiver, IntPtr selector, NSRect rect);
-
-        [DllImport("/usr/lib/libobjc.dylib")]
-        private static extern IntPtr objc_allocateClassPair(IntPtr superclass, string name, nint extraBytes);
-
-        [DllImport("/usr/lib/libobjc.dylib")]
-        private static extern void objc_registerClassPair(IntPtr cls);
-
-        [DllImport("/usr/lib/libobjc.dylib")]
-        private static extern bool class_addMethod(IntPtr cls, IntPtr name, IntPtr imp, string types);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct NSRect
@@ -173,61 +155,46 @@ namespace OwnVST3Host.NativeWindow
 
         static NativeWindowMac()
         {
-            // Load _dispatch_main_q symbol (dispatch_get_main_queue is inline, not a real function)
-            IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
-            if (mainQueueSymbol == IntPtr.Zero)
-                throw new InvalidOperationException(
-                    "Failed to load _dispatch_main_q from libSystem. macOS 10.13+ required.");
-            _mainQueue = mainQueueSymbol;
+            try
+            {
+                // Load _dispatch_main_q symbol (dispatch_get_main_queue is inline, not a real function)
+                // Use RTLD_DEFAULT to search in already loaded libraries
+                IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
+                if (mainQueueSymbol != IntPtr.Zero)
+                {
+                    // _dispatch_main_q is a struct, not a pointer, so we use its address directly
+                    _mainQueue = mainQueueSymbol;
+                }
+                else
+                {
+                    throw new InvalidOperationException("Failed to load _dispatch_main_q symbol");
+                }
 
-            // Load kCFRunLoopCommonModes from CoreFoundation
-            IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
-            if (cfHandle == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to load CoreFoundation framework.");
+                // Load kCFRunLoopCommonModes constant directly from CoreFoundation framework
+                // This is the correct way to access built-in CFString constants
+                IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
+                if (cfHandle != IntPtr.Zero)
+                {
+                    IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
+                    if (symbolPtr != IntPtr.Zero)
+                    {
+                        // kCFRunLoopCommonModes is a CFStringRef*, so we need to dereference it
+                        kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
+                    }
+                }
 
-            IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
-            if (symbolPtr == IntPtr.Zero)
-                throw new InvalidOperationException(
-                    "Failed to load kCFRunLoopCommonModes from CoreFoundation.");
-
-            kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
+                if (kCFRunLoopCommonModes == IntPtr.Zero)
+                {
+                    throw new InvalidOperationException("Failed to load kCFRunLoopCommonModes constant from CoreFoundation framework");
+                }
+            }
+            catch (Exception ex)
+            {
+                throw;
+            }
         }
 
         private static bool IsMainThread() => pthread_main_np() != 0;
-
-        /// <summary>
-        /// Registers a one-time ObjC class "OwnVST3WndObserver" implementing windowWillClose:.
-        /// Called on the macOS main thread; safe to call multiple times (idempotent).
-        /// </summary>
-        private static void EnsureObserverClass()
-        {
-            if (_observerClass != IntPtr.Zero) return;
-
-            IntPtr nsObject = objc_getClass("NSObject");
-            _observerClass = objc_allocateClassPair(nsObject, "OwnVST3WndObserver", 0);
-            if (_observerClass == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to allocate ObjC observer class.");
-
-            // Keep the delegate alive for the lifetime of the process (prevents GC collection)
-            _closeCallbackHolder = StaticWindowWillClose;
-            class_addMethod(
-                _observerClass,
-                sel_registerName("windowWillClose:"),
-                Marshal.GetFunctionPointerForDelegate(_closeCallbackHolder),
-                "v@:@"); // void, id self, SEL cmd, id notification
-
-            objc_registerClassPair(_observerClass);
-        }
-
-        /// <summary>
-        /// ObjC callback – fired on the main thread when the window is about to close.
-        /// Looks up the C# action registered for this observer instance and invokes it.
-        /// </summary>
-        private static void StaticWindowWillClose(IntPtr self, IntPtr cmd, IntPtr notification)
-        {
-            if (_closeCallbacks.TryGetValue(self, out var callback))
-                callback();
-        }
 
         /// <summary>
         /// Asynchronously executes an operation on the macOS main thread.
@@ -399,7 +366,8 @@ namespace OwnVST3Host.NativeWindow
             // macOS coordinate system: bottom-left corner is (0,0), so we use 0,0
             NSRect contentRect = new NSRect(0, 0, width, height);
 
-            // NSWindowStyleMask: Titled(1) | Closable(2) | Miniaturizable(4) | Resizable(8)
+            // NSWindowStyleMask: Titled | Closable | Miniaturizable | Resizable
+            // Titled = 1, Closable = 2, Miniaturizable = 4, Resizable = 8
             IntPtr styleMask = new IntPtr(1 | 2 | 4 | 8);
 
             _nsWindow = objc_msgSend(nsWindowClass, sel_registerName("alloc"));
@@ -454,51 +422,8 @@ namespace OwnVST3Host.NativeWindow
             // This ensures proper window hierarchy for plugin popup windows/menus
             objc_msgSend(_nsWindow, sel_registerName("setContentView:"), _nsView);
 
-            // Register close-button observer: fires OnClosed when user clicks the X button
-            SetupCloseDelegate();
-
             // Show window
             objc_msgSend(_nsWindow, sel_registerName("makeKeyAndOrderFront:"), IntPtr.Zero);
-        }
-
-        /// <summary>
-        /// Sets up an ObjC window delegate that fires OnClosed when the user clicks the X button.
-        /// MUST be called on the macOS main thread.
-        /// </summary>
-        private void SetupCloseDelegate()
-        {
-            EnsureObserverClass();
-
-            _observerInstance = objc_msgSend(_observerClass, sel_registerName("alloc"));
-            _observerInstance = objc_msgSend(_observerInstance, sel_registerName("init"));
-
-            _closeCallbacks[_observerInstance] = HandleWindowClosed;
-            objc_msgSend(_nsWindow, sel_registerName("setDelegate:"), _observerInstance);
-        }
-
-        /// <summary>
-        /// Called on the main thread when the user closes the window via the X button.
-        /// windowWillClose: fires before the window actually closes, so the NSWindow/NSView
-        /// are still valid here. We clean up our C# state and fire OnClosed.
-        /// </summary>
-        private void HandleWindowClosed()
-        {
-            // Remove from registry first to prevent re-entrancy
-            if (_observerInstance != IntPtr.Zero)
-            {
-                _closeCallbacks.Remove(_observerInstance);
-                // Remove delegate reference from window (it is closing anyway, but be explicit)
-                if (_nsWindow != IntPtr.Zero)
-                    objc_msgSend(_nsWindow, sel_registerName("setDelegate:"), IntPtr.Zero);
-                objc_msgSend(_observerInstance, sel_registerName("release"));
-                _observerInstance = IntPtr.Zero;
-            }
-
-            // The window is closing – NSWindow will handle the actual close, we just null our refs
-            _nsWindow = IntPtr.Zero;
-            _nsView   = IntPtr.Zero;
-
-            OnClosed?.Invoke();
         }
 
         public void Close()
@@ -518,20 +443,11 @@ namespace OwnVST3Host.NativeWindow
         /// </summary>
         private void CloseOnMainThread()
         {
-            // Remove the close delegate BEFORE calling close so windowWillClose: does not
-            // fire OnClosed a second time during a code-initiated close.
-            if (_observerInstance != IntPtr.Zero)
-            {
-                _closeCallbacks.Remove(_observerInstance);
-                if (_nsWindow != IntPtr.Zero)
-                    objc_msgSend(_nsWindow, sel_registerName("setDelegate:"), IntPtr.Zero);
-                objc_msgSend(_observerInstance, sel_registerName("release"));
-                _observerInstance = IntPtr.Zero;
-            }
-
             if (_nsWindow != IntPtr.Zero)
             {
                 objc_msgSend(_nsWindow, sel_registerName("close"));
+
+                // Release
                 objc_msgSend(_nsWindow, sel_registerName("release"));
                 _nsWindow = IntPtr.Zero;
             }

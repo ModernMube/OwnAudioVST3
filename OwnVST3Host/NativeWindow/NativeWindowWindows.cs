@@ -21,7 +21,6 @@ namespace OwnVST3Host.NativeWindow
         private bool _disposed = false;
         private WndProcDelegate? _wndProcDelegate;
         private string? _windowClassName;
-        private Exception? _windowThreadException;
 
         public bool IsOpen => _hwnd != IntPtr.Zero;
 
@@ -53,15 +52,14 @@ namespace OwnVST3Host.NativeWindow
 
         #region Win32 API Declarations
 
-        private const int WS_OVERLAPPED  = 0x00000000;
-        private const int WS_CAPTION     = 0x00C00000;
-        private const int WS_SYSMENU     = 0x00080000;
-        private const int WS_THICKFRAME  = 0x00040000;
+        private const int WS_OVERLAPPED = 0x00000000;
+        private const int WS_CAPTION = 0x00C00000;
+        private const int WS_SYSMENU = 0x00080000;
+        private const int WS_THICKFRAME = 0x00040000;
         private const int WS_MINIMIZEBOX = 0x00020000;
         private const int WS_MAXIMIZEBOX = 0x00010000;
-        private const int WS_VISIBLE     = 0x10000000;
+        private const int WS_VISIBLE = 0x10000000;
 
-        // Titled, resizable, with min/max/close buttons
         private const int WS_VST_WINDOW = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
 
         private const int CW_USEDEFAULT = unchecked((int)0x80000000);
@@ -182,11 +180,10 @@ namespace OwnVST3Host.NativeWindow
 
             _windowCreated.Wait();
 
-            if (_windowThreadException != null)
-                throw new InvalidOperationException("VST window thread error", _windowThreadException);
-
             if (_hwnd == IntPtr.Zero)
+            {
                 throw new InvalidOperationException("Failed to create window on dedicated thread!");
+            }
         }
 
         private void WindowThreadProc(string title, int width, int height)
@@ -220,7 +217,7 @@ namespace OwnVST3Host.NativeWindow
                     return;
                 }
 
-                // Create window WITHOUT close button (WS_VST_WINDOW excludes WS_SYSMENU)
+                // Create window with close button (WS_VST_WINDOW includes WS_SYSMENU)
                 // The window lifecycle is managed by code, not by user interaction
                 _hwnd = CreateWindowEx(
                     0,
@@ -255,7 +252,6 @@ namespace OwnVST3Host.NativeWindow
             }
             catch (Exception ex)
             {
-                _windowThreadException = ex;
                 Console.WriteLine($"[VST Window] Window thread error: {ex.Message}");
                 _windowCreated.Set();
             }

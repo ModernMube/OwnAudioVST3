@@ -19,17 +19,11 @@ namespace OwnVST3Host.NativeWindow
         private CancellationTokenSource? _idleCancellation;
         private bool _disposed = false;
 
-        // Pre-cached delegate to avoid 50 closure allocations/second in the idle loop.
-        // A lambda capturing _vst3Wrapper would create a new Action object on every BeginInvoke call.
-        private readonly Action _processIdleAction;
-
         private const int IdleIntervalMs = 20; // 50Hz for GUI updates
 
         public VstEditorController(OwnVst3Wrapper vst3Wrapper)
         {
             _vst3Wrapper = vst3Wrapper ?? throw new ArgumentNullException(nameof(vst3Wrapper));
-            // Allocate the idle delegate exactly once (cross-platform: pure managed C#).
-            _processIdleAction = () => { if (!_disposed) _vst3Wrapper.ProcessIdle(); };
         }
 
         public bool IsOpen => _nativeWindow?.IsOpen ?? false;
@@ -70,7 +64,10 @@ namespace OwnVST3Host.NativeWindow
                 bool success = _vst3Wrapper.CreateEditor(windowHandle);
 
                 if (!success)
+                {
+                    CloseEditor();
                     throw new InvalidOperationException("Failed to create VST editor!");
+                }
 
                 // Start dedicated idle thread with high priority
                 // This guarantees that ProcessIdle runs even when ThreadPool is under load
@@ -141,23 +138,13 @@ namespace OwnVST3Host.NativeWindow
 
         private void OnWindowClosed()
         {
-            // Called from the native window thread when the user clicks the X button.
-            // We MUST stop the idle thread (and wait for it to finish) before calling
-            // CloseEditor(), because ProcessIdle() must not run while the plugin is
-            // being torn down – doing so can crash the native plugin.
+            // The window was closed with the close button (X) - called from window thread
             try
             {
+                // Stop idle thread
                 _idleCancellation?.Cancel();
                 _idleCancellation?.Dispose();
                 _idleCancellation = null;
-
-                // Join before CloseEditor to ensure no ProcessIdle() is in flight
-                if (_idleThread != null)
-                {
-                    if (!_idleThread.Join(500))
-                        Console.WriteLine("[VST Editor] Warning: idle thread did not stop within 500ms on user close");
-                    _idleThread = null;
-                }
 
                 _vst3Wrapper.CloseEditor();
             }
@@ -192,10 +179,9 @@ namespace OwnVST3Host.NativeWindow
                         // Only work if the window is still open
                         if (!_disposed && _nativeWindow != null)
                         {
-                            // ProcessIdle runs on the native window thread.
-                            // On macOS this is marshaled to the main thread.
-                            // Using the pre-cached _processIdleAction avoids a new closure allocation on every tick.
-                            _nativeWindow.BeginInvoke(_processIdleAction);
+                            // ProcessIdle runs on the native window thread
+                            // On macOS this is marshaled to the main thread
+                            _nativeWindow.BeginInvoke(() => _vst3Wrapper.ProcessIdle());
                         }
                     }
                     catch (Exception ex)

@@ -330,20 +330,8 @@ namespace OwnVST3Host
         {
             if (!_disposed)
             {
-                // Set _disposed FIRST — CheckDisposed() guards every method that calls into
-                // the native library. If we set it last, there is a window between
-                // NativeLibrary.Free() and the flag being true where another thread could
-                // pass CheckDisposed() and call into unmapped memory → SEGFAULT.
-                _disposed = true;
-
                 if (_pluginHandle != IntPtr.Zero)
                 {
-                    // Must call _destroyFunc BEFORE freeing the library handle.
-                    // Without this, the native C++ plugin object (and its internal
-                    // threads, COM state, VST3 infrastructure) is never freed.
-                    // Skipping this call was the root cause of accumulated native
-                    // instances causing 2–3 s startup lag after repeated effect switches.
-                    _destroyFunc?.Invoke(_pluginHandle);
                     _pluginHandle = IntPtr.Zero;
                 }
 
@@ -352,6 +340,8 @@ namespace OwnVST3Host
                     NativeLibrary.Free(_libraryHandle);
                     _libraryHandle = IntPtr.Zero;
                 }
+
+                _disposed = true;
             }
         }
         #endregion
