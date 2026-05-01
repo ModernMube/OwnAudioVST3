@@ -137,15 +137,36 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Initializes the plugin
+        /// Initializes the plugin and pre-allocates audio buffer handles to eliminate
+        /// per-callback heap allocations in ProcessAudio.
         /// </summary>
-        /// <param name="sampleRate">Sample rate</param>
-        /// <param name="maxBlockSize">Maximum block size</param>
-        /// <returns>True if successful</returns>
         public bool Initialize(double sampleRate, int maxBlockSize)
         {
             CheckDisposed();
-            return _initializeFunc(_pluginHandle, sampleRate, maxBlockSize);
+            bool ok = _initializeFunc(_pluginHandle, sampleRate, maxBlockSize);
+            if (ok)
+            {
+                int channels = Math.Max(ActualInputChannels, ActualOutputChannels);
+                if (channels != _preallocChannels)
+                {
+                    // Release previous pinned arrays before reallocating.
+                    if (_inputPtrsHandle.IsAllocated)  _inputPtrsHandle.Free();
+                    if (_outputPtrsHandle.IsAllocated) _outputPtrsHandle.Free();
+
+                    _inputHandles  = new GCHandle[channels];
+                    _outputHandles = new GCHandle[channels];
+                    _inputPtrs     = new IntPtr[channels];
+                    _outputPtrs    = new IntPtr[channels];
+
+                    // Pin the IntPtr arrays permanently — they are owned by this object
+                    // and their address is passed to native code on every ProcessAudio call.
+                    _inputPtrsHandle  = GCHandle.Alloc(_inputPtrs,  GCHandleType.Pinned);
+                    _outputPtrsHandle = GCHandle.Alloc(_outputPtrs, GCHandleType.Pinned);
+
+                    _preallocChannels = channels;
+                }
+            }
+            return ok;
         }
 
         /// <summary>
@@ -170,7 +191,10 @@ namespace OwnVST3Host
 
             // Channels to pass to the plugin: limited to what the plugin supports and
             // what the caller provided.
+            // Clamp to what the plugin declared AND what we pre-allocated in Initialize().
+            // _preallocChannels == 0 means Initialize was never called: fall through to pass-through.
             int pluginChannels = Math.Min(numChannels, Math.Min(actualIn, actualOut));
+            pluginChannels = Math.Min(pluginChannels, _preallocChannels);
 
             if (pluginChannels <= 0)
             {
@@ -181,39 +205,29 @@ namespace OwnVST3Host
                 return false;
             }
 
-            // Convert to interop structure using the clamped channel count.
-            AudioBufferC buffer = new AudioBufferC();
-
-            // Pin only the channels the plugin can actually process.
-            GCHandle[] inputHandles = new GCHandle[pluginChannels];
-            GCHandle[] outputHandles = new GCHandle[pluginChannels];
-
-            IntPtr[] inputPtrs = new IntPtr[pluginChannels];
-            IntPtr[] outputPtrs = new IntPtr[pluginChannels];
+            // Use pre-allocated arrays from Initialize() to avoid per-callback heap allocations.
+            // GCHandle.Alloc does not allocate GC memory — it only registers a GC root.
+            // The IntPtr[] arrays (_inputPtrs, _outputPtrs) are permanently pinned.
+            var inputHandles  = _inputHandles;
+            var outputHandles = _outputHandles;
 
             for (int i = 0; i < pluginChannels; i++)
             {
-                inputHandles[i] = GCHandle.Alloc(inputs[i], GCHandleType.Pinned);
+                inputHandles[i]  = GCHandle.Alloc(inputs[i],  GCHandleType.Pinned);
                 outputHandles[i] = GCHandle.Alloc(outputs[i], GCHandleType.Pinned);
-
-                inputPtrs[i] = inputHandles[i].AddrOfPinnedObject();
-                outputPtrs[i] = outputHandles[i].AddrOfPinnedObject();
+                _inputPtrs[i]    = inputHandles[i].AddrOfPinnedObject();
+                _outputPtrs[i]   = outputHandles[i].AddrOfPinnedObject();
             }
 
-            // Allocate pointers array
-            GCHandle inputsHandle = GCHandle.Alloc(inputPtrs, GCHandleType.Pinned);
-            GCHandle outputsHandle = GCHandle.Alloc(outputPtrs, GCHandleType.Pinned);
-
-            buffer.inputs = inputsHandle.AddrOfPinnedObject();
-            buffer.outputs = outputsHandle.AddrOfPinnedObject();
-            buffer.numChannels = pluginChannels;
-            buffer.numSamples = numSamples;
+            AudioBufferC buffer = new AudioBufferC
+            {
+                inputs     = _inputPtrsHandle.AddrOfPinnedObject(),
+                outputs    = _outputPtrsHandle.AddrOfPinnedObject(),
+                numChannels = pluginChannels,
+                numSamples  = numSamples
+            };
 
             bool result = _processAudioFunc(_pluginHandle, ref buffer);
-
-            // Free GCHandles
-            inputsHandle.Free();
-            outputsHandle.Free();
 
             for (int i = 0; i < pluginChannels; i++)
             {

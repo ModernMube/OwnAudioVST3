@@ -47,7 +47,9 @@ public class App : Application
 
 public class MainWindow : Window
 {
-    private OwnVst3Wrapper? _currentPlugin;
+    // ThreadedVst3Wrapper runs all plugin operations on its own dedicated thread,
+    // keeping the Avalonia UI thread completely free.
+    private ThreadedVst3Wrapper? _plugin;
     private readonly ListBox _pluginList;
     private readonly TextBlock _statusText;
     private readonly Button _openEditorButton;
@@ -64,13 +66,8 @@ public class MainWindow : Window
         Height = 500;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
-        // Create UI
-        var mainPanel = new DockPanel
-        {
-            Margin = new Thickness(10)
-        };
+        var mainPanel = new DockPanel { Margin = new Thickness(10) };
 
-        // Top panel with title
         var titleBlock = new TextBlock
         {
             Text = "VST3 Plugin Browser",
@@ -81,16 +78,10 @@ public class MainWindow : Window
         DockPanel.SetDock(titleBlock, Dock.Top);
         mainPanel.Children.Add(titleBlock);
 
-        // Status bar at bottom
-        _statusText = new TextBlock
-        {
-            Text = "Ready",
-            Margin = new Thickness(0, 10, 0, 0)
-        };
+        _statusText = new TextBlock { Text = "Ready", Margin = new Thickness(0, 10, 0, 0) };
         DockPanel.SetDock(_statusText, Dock.Bottom);
         mainPanel.Children.Add(_statusText);
 
-        // Right panel with plugin info and button
         _pluginInfoPanel = new StackPanel
         {
             Width = 250,
@@ -107,7 +98,6 @@ public class MainWindow : Window
         _openEditorButton.Click += OnOpenEditorClick;
         _pluginInfoPanel.Children.Add(_openEditorButton);
 
-        // Play button
         _playButton = new Button
         {
             Content = "▶ Play White Noise (60s)",
@@ -118,7 +108,6 @@ public class MainWindow : Window
         _playButton.Click += OnPlayClick;
         _pluginInfoPanel.Children.Add(_playButton);
 
-        // Stop button
         _stopButton = new Button
         {
             Content = "⏹ Stop",
@@ -134,10 +123,9 @@ public class MainWindow : Window
             Content = "Refresh Plugin List",
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        refreshButton.Click += (s, e) => RefreshPluginList();
+        refreshButton.Click += (_, _) => RefreshPluginList();
         _pluginInfoPanel.Children.Add(refreshButton);
 
-        // Plugin info display
         _pluginInfoPanel.Children.Add(new TextBlock
         {
             Text = "Plugin Info:",
@@ -148,46 +136,27 @@ public class MainWindow : Window
         DockPanel.SetDock(_pluginInfoPanel, Dock.Right);
         mainPanel.Children.Add(_pluginInfoPanel);
 
-        // Plugin list
-        _pluginList = new ListBox
-        {
-            SelectionMode = SelectionMode.Single
-        };
+        _pluginList = new ListBox { SelectionMode = SelectionMode.Single };
         _pluginList.SelectionChanged += OnPluginSelected;
         mainPanel.Children.Add(_pluginList);
 
         Content = mainPanel;
-
-        // Load plugins on startup
-        Opened += (s, e) => RefreshPluginList();
+        Opened += (_, _) => RefreshPluginList();
     }
 
     private void RefreshPluginList()
     {
-        _statusText.Text = "Scanning for VST3 plugins...";
+        _statusText.Text = "Scanning for VST3 plugins…";
         _pluginList.ItemsSource = null;
 
         try
         {
-            // Only use x64 plugin directory on 64-bit systems to avoid architecture mismatch
-            var directories = new List<string>();
-            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-            string vst3Path = Path.Combine(programFiles, "Common Files", "VST3");
-            if (Directory.Exists(vst3Path))
-            {
-                directories.Add(vst3Path);
-            }
-
-            //var plugins = OwnVst3Wrapper.FindVst3Plugins(directories.ToArray());
-
             var plugins = OwnVst3Wrapper.FindVst3Plugins();
-            _pluginList.ItemsSource = plugins.Select(p => new PluginItem
-            {
-                Path = p,
-                Name = Path.GetFileNameWithoutExtension(p)
-            }).ToList();
+            _pluginList.ItemsSource = plugins
+                .Select(p => new PluginItem { Path = p, Name = Path.GetFileNameWithoutExtension(p) })
+                .ToList();
 
-            _statusText.Text = $"Found {plugins.Count} VST3 plugin(s) in x64 directory";
+            _statusText.Text = $"Found {plugins.Count} VST3 plugin(s)";
         }
         catch (Exception ex)
         {
@@ -195,7 +164,12 @@ public class MainWindow : Window
         }
     }
 
-    private void OnPluginSelected(object? sender, SelectionChangedEventArgs e)
+    // -------------------------------------------------------------------------
+    // Plugin selection – async so the UI thread is never blocked.
+    // LoadPlugin and Initialize run on the dedicated VST plugin thread.
+    // -------------------------------------------------------------------------
+
+    private async void OnPluginSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (_pluginList.SelectedItem is not PluginItem item)
         {
@@ -203,49 +177,54 @@ public class MainWindow : Window
             return;
         }
 
+        // Clean up the previous plugin (this disposes the inner OwnVst3Wrapper too).
+        CleanupCurrentPlugin();
+
+        _statusText.Text = $"Loading {item.Name}…";
+        _openEditorButton.IsEnabled = false;
+        _playButton.IsEnabled = false;
+
         try
         {
-            // Dispose previous plugin and editor
-            _editorController?.CloseEditor();
-            _editorController?.Dispose();
-            _editorController = null;
-            _currentPlugin?.Dispose();
-            _currentPlugin = null;
+            // Create the wrapper – this also starts the dedicated plugin thread.
+            _plugin = new ThreadedVst3Wrapper();
 
-            _statusText.Text = $"Loading {item.Name}...";
-
-            // Load new plugin
-            _currentPlugin = new OwnVst3Wrapper();
-            if (_currentPlugin.LoadPlugin(item.Path))
+            // LoadPlugin runs on the plugin thread; the UI thread is free during the await.
+            bool loaded = await _plugin.LoadPluginAsync(item.Path);
+            if (!loaded)
             {
-                // Check if plugin was actually loaded (name should not be empty)
-                string? pluginName = _currentPlugin.Name;
-                if (string.IsNullOrEmpty(pluginName))
-                {
-                    _statusText.Text = "Plugin load failed - architecture mismatch? (x86 vs x64)";
-                    _openEditorButton.IsEnabled = false;
-                    return;
-                }
-
-                _currentPlugin.Initialize(44100, 512);
-
-                // Update info panel
-                UpdatePluginInfo();
-
-                // Ellenőrizzük, hogy van-e editor (GetEditorSize() null-t ad vissza, ha nincs)
-                bool hasEditor = _currentPlugin.GetEditorSize().HasValue;
-                _openEditorButton.IsEnabled = hasEditor;
-                _playButton.IsEnabled = true;
-                _statusText.Text = hasEditor
-                    ? $"Loaded: {pluginName}"
-                    : $"Loaded: {pluginName} (no editor available)";
+                _statusText.Text = "Failed to load plugin.";
+                return;
             }
-            else
+
+            // Quick sanity-check: if the name is empty the library probably loaded a wrong arch.
+            string name = await _plugin.GetNameAsync();
+            if (string.IsNullOrEmpty(name))
             {
-                _statusText.Text = "Failed to load plugin";
-                _openEditorButton.IsEnabled = false;
-                _playButton.IsEnabled = false;
+                _statusText.Text = "Plugin load failed – architecture mismatch? (x86 vs x64)";
+                return;
             }
+
+            // Initialize audio engine on the plugin thread.
+            await _plugin.InitializeAsync(44100, 512);
+
+            // Fetch info for the UI panel (all on the plugin thread, awaited).
+            string vendor = await _plugin.GetVendorAsync();
+            string? version = await _plugin.GetVersionAsync();
+            bool isInstrument = await _plugin.GetIsInstrumentAsync();
+            bool isEffect = await _plugin.GetIsEffectAsync();
+            int paramCount = await _plugin.GetParameterCountAsync();
+            EditorSize? editorSize = await _plugin.GetEditorSizeAsync();
+
+            // Back on the UI thread: update controls.
+            UpdatePluginInfo(name, vendor, version, isInstrument, isEffect, paramCount, editorSize);
+
+            bool hasEditor = editorSize.HasValue;
+            _openEditorButton.IsEnabled = hasEditor;
+            _playButton.IsEnabled = true;
+            _statusText.Text = hasEditor
+                ? $"Loaded: {name}"
+                : $"Loaded: {name} (no editor available)";
         }
         catch (Exception ex)
         {
@@ -255,19 +234,23 @@ public class MainWindow : Window
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Playback (audio runs on a dedicated audio thread inside WhiteNoiseProcessor)
+    // -------------------------------------------------------------------------
+
     private void OnPlayClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (_currentPlugin == null) return;
+        if (_plugin == null) return;
 
         try
         {
             _noiseProcessor?.Dispose();
-            _noiseProcessor = new WhiteNoiseProcessor(_currentPlugin);
+            _noiseProcessor = new WhiteNoiseProcessor(_plugin);
             _noiseProcessor.Start();
 
             _playButton.IsEnabled = false;
             _stopButton.IsEnabled = true;
-            _statusText.Text = "Processing white noise through VST plugin...";
+            _statusText.Text = "Processing white noise through VST plugin…";
         }
         catch (Exception ex)
         {
@@ -283,7 +266,7 @@ public class MainWindow : Window
             _noiseProcessor?.Dispose();
             _noiseProcessor = null;
 
-            _playButton.IsEnabled = _currentPlugin != null;
+            _playButton.IsEnabled = _plugin != null;
             _stopButton.IsEnabled = false;
             _statusText.Text = "Processing stopped";
         }
@@ -293,29 +276,61 @@ public class MainWindow : Window
         }
     }
 
-    private void UpdatePluginInfo()
+    // -------------------------------------------------------------------------
+    // Editor (CreateEditor/CloseEditor stay on the UI thread per VST3 + macOS requirement)
+    // -------------------------------------------------------------------------
+
+    private async void OnOpenEditorClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        if (_currentPlugin == null)
-            return;
+        if (_plugin == null) return;
 
-        // Remove old info (keep buttons)
+        try
+        {
+            if (_editorController?.IsEditorOpen == true)
+            {
+                _editorController.CloseEditor();
+                _openEditorButton.Content = "Open Editor";
+                _statusText.Text = "Editor closed";
+                return;
+            }
+
+            if (_editorController == null)
+                _editorController = new VstEditorController(_plugin);
+
+            string pluginName = await _plugin.GetNameAsync();
+
+            // OpenEditorAsync fetches the editor size on the plugin thread (non-blocking),
+            // then opens the window and calls CreateEditor on the UI thread.
+            await _editorController.OpenEditorAsync(pluginName);
+
+            _openEditorButton.Content = "Close Editor";
+            _statusText.Text = "Editor opened in native window";
+        }
+        catch (Exception ex)
+        {
+            _statusText.Text = $"Error opening editor: {ex.Message}";
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private void UpdatePluginInfo(string name, string vendor, string? version,
+        bool isInstrument, bool isEffect, int paramCount, EditorSize? editorSize)
+    {
+        // Keep the fixed buttons (indices 0-3) and replace everything after them.
         while (_pluginInfoPanel.Children.Count > 4)
-        {
             _pluginInfoPanel.Children.RemoveAt(4);
-        }
 
-        // Add plugin info
-        AddInfoLine("Name", _currentPlugin.Name);
-        AddInfoLine("Vendor", _currentPlugin.Vendor);
-        AddInfoLine("Version", _currentPlugin.Version);
-        AddInfoLine("Type", _currentPlugin.IsInstrument ? "Instrument" : (_currentPlugin.IsEffect ? "Effect" : "Unknown"));
-        AddInfoLine("Parameters", _currentPlugin.GetParameterCount().ToString());
+        AddInfoLine("Name", name);
+        AddInfoLine("Vendor", vendor);
+        AddInfoLine("Version", version);
+        AddInfoLine("Type", isInstrument ? "Instrument" : (isEffect ? "Effect" : "Unknown"));
+        AddInfoLine("Parameters", paramCount.ToString());
 
-        var size = _currentPlugin.GetEditorSize();
-        if (size.HasValue)
-        {
-            AddInfoLine("Editor Size", $"{size.Value.Width} x {size.Value.Height}");
-        }
+        if (editorSize.HasValue)
+            AddInfoLine("Editor Size", $"{editorSize.Value.Width} x {editorSize.Value.Height}");
     }
 
     private void AddInfoLine(string label, string? value)
@@ -327,48 +342,23 @@ public class MainWindow : Window
         });
     }
 
-    private void OnOpenEditorClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void CleanupCurrentPlugin()
     {
-        if (_currentPlugin == null)
-            return;
+        _noiseProcessor?.Stop();
+        _noiseProcessor?.Dispose();
+        _noiseProcessor = null;
 
-        try
-        {
-            // Ha már van nyitva editor, bezárjuk
-            if (_editorController?.IsEditorOpen == true)
-            {
-                _editorController.CloseEditor();
-                _openEditorButton.Content = "Open Editor";
-                _statusText.Text = "Editor closed";
-                return;
-            }
+        _editorController?.CloseEditor();
+        _editorController?.Dispose();
+        _editorController = null;
 
-            // Új editor controller létrehozása ha még nincs
-            if (_editorController == null)
-            {
-                _editorController = new VstEditorController(_currentPlugin);
-            }
-
-            // Editor megnyitása natív ablakban
-            string pluginName = _currentPlugin.Name ?? "VST3 Plugin";
-            _editorController.OpenEditor(pluginName);
-
-            _openEditorButton.Content = "Close Editor";
-            _statusText.Text = "Editor opened in native window";
-        }
-        catch (Exception ex)
-        {
-            _statusText.Text = $"Error opening editor: {ex.Message}";
-        }
+        _plugin?.Dispose();
+        _plugin = null;
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        _noiseProcessor?.Stop();
-        _noiseProcessor?.Dispose();
-        _editorController?.CloseEditor();
-        _editorController?.Dispose();
-        _currentPlugin?.Dispose();
+        CleanupCurrentPlugin();
         base.OnClosed(e);
     }
 }
@@ -377,6 +367,5 @@ public class PluginItem
 {
     public required string Path { get; set; }
     public required string Name { get; set; }
-
     public override string ToString() => Name;
 }

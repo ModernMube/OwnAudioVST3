@@ -52,6 +52,16 @@ namespace OwnVST3Host
         private VST3Plugin_SetTransportStateDelegate? _setTransportStateFunc;
         private VST3Plugin_ResetTransportPositionDelegate? _resetTransportPositionFunc;
 
+        // Pre-allocated audio buffer handles — reused every ProcessAudio call to
+        // eliminate per-callback heap allocations. Allocated in Initialize().
+        private GCHandle[] _inputHandles  = Array.Empty<GCHandle>();
+        private GCHandle[] _outputHandles = Array.Empty<GCHandle>();
+        private IntPtr[]   _inputPtrs     = Array.Empty<IntPtr>();
+        private IntPtr[]   _outputPtrs    = Array.Empty<IntPtr>();
+        private GCHandle   _inputPtrsHandle;   // permanently pinned IntPtr[]
+        private GCHandle   _outputPtrsHandle;  // permanently pinned IntPtr[]
+        private int        _preallocChannels;
+
         #endregion
 
         #region Constructor and Destructor
@@ -330,8 +340,13 @@ namespace OwnVST3Host
         {
             if (!_disposed)
             {
+                // Release the permanently-pinned IntPtr arrays before freeing the plugin.
+                if (_inputPtrsHandle.IsAllocated)  _inputPtrsHandle.Free();
+                if (_outputPtrsHandle.IsAllocated) _outputPtrsHandle.Free();
+
                 if (_pluginHandle != IntPtr.Zero)
                 {
+                    _destroyFunc(_pluginHandle);
                     _pluginHandle = IntPtr.Zero;
                 }
 

@@ -50,8 +50,11 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern IntPtr objc_msgSend(IntPtr receiver, IntPtr selector, IntPtr arg1);
 
+        // Objective-C BOOL is 'signed char' (1 byte). UnmanagedType.I1 prevents the default
+        // 4-byte BOOL marshaling that would send garbage in the upper bytes on strict ABIs.
         [DllImport("/usr/lib/libobjc.dylib")]
-        private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, bool arg1);
+        private static extern void objc_msgSend(IntPtr receiver, IntPtr selector,
+            [MarshalAs(UnmanagedType.I1)] bool arg1);
 
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, long arg1);
@@ -155,43 +158,25 @@ namespace OwnVST3Host.NativeWindow
 
         static NativeWindowMac()
         {
-            try
-            {
-                // Load _dispatch_main_q symbol (dispatch_get_main_queue is inline, not a real function)
-                // Use RTLD_DEFAULT to search in already loaded libraries
-                IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
-                if (mainQueueSymbol != IntPtr.Zero)
-                {
-                    // _dispatch_main_q is a struct, not a pointer, so we use its address directly
-                    _mainQueue = mainQueueSymbol;
-                }
-                else
-                {
-                    throw new InvalidOperationException("Failed to load _dispatch_main_q symbol");
-                }
+            // Load _dispatch_main_q symbol. dispatch_get_main_queue() is an inline function
+            // that is not exported, so we load the underlying symbol directly via RTLD_DEFAULT.
+            IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
+            if (mainQueueSymbol == IntPtr.Zero)
+                throw new InvalidOperationException("Failed to load _dispatch_main_q symbol.");
+            _mainQueue = mainQueueSymbol;
 
-                // Load kCFRunLoopCommonModes constant directly from CoreFoundation framework
-                // This is the correct way to access built-in CFString constants
-                IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
-                if (cfHandle != IntPtr.Zero)
-                {
-                    IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
-                    if (symbolPtr != IntPtr.Zero)
-                    {
-                        // kCFRunLoopCommonModes is a CFStringRef*, so we need to dereference it
-                        kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
-                    }
-                }
-
-                if (kCFRunLoopCommonModes == IntPtr.Zero)
-                {
-                    throw new InvalidOperationException("Failed to load kCFRunLoopCommonModes constant from CoreFoundation framework");
-                }
-            }
-            catch (Exception ex)
+            // Load kCFRunLoopCommonModes from CoreFoundation. It is a CFStringRef* exported
+            // as a data symbol, so we dereference the pointer to get the CFStringRef value.
+            IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
+            if (cfHandle != IntPtr.Zero)
             {
-                throw;
+                IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
+                if (symbolPtr != IntPtr.Zero)
+                    kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
             }
+
+            if (kCFRunLoopCommonModes == IntPtr.Zero)
+                throw new InvalidOperationException("Failed to load kCFRunLoopCommonModes from CoreFoundation.");
         }
 
         private static bool IsMainThread() => pthread_main_np() != 0;

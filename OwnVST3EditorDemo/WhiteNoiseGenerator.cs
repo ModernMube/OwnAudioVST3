@@ -6,106 +6,122 @@ using OwnVST3Host;
 namespace OwnVST3EditorDemo
 {
     /// <summary>
-    /// Simple white noise generator and VST processor for testing
-    /// Generates white noise and processes it through a VST plugin in real-time
+    /// Generates white noise and processes it through a VST plugin in real-time.
+    /// Audio processing runs on its own dedicated thread, completely independent of the UI thread.
+    /// Accepts both OwnVst3Wrapper (legacy) and ThreadedVst3Wrapper (recommended).
     /// </summary>
     public class WhiteNoiseProcessor : IDisposable
     {
-        private readonly OwnVst3Wrapper _plugin;
-        private readonly Random _random = new Random();
-        private CancellationTokenSource? _cancellationTokenSource;
-        private Task? _processingTask;
+        // Delegate-based call surface so the audio loop is agnostic to wrapper type.
+        private readonly Func<float[][], float[][], int, int, bool> _processAudio;
+        private readonly Action<bool> _setTransportState;
+        private readonly Action _resetTransportPosition;
+
+        private readonly Random _random = new();
+        private CancellationTokenSource? _cts;
+        private Thread? _audioThread;
         private bool _disposed;
 
-        public bool IsPlaying => _processingTask != null && !_processingTask.IsCompleted;
+        public bool IsPlaying => _audioThread?.IsAlive ?? false;
 
+        /// <summary>Legacy constructor – uses OwnVst3Wrapper directly.</summary>
         public WhiteNoiseProcessor(OwnVst3Wrapper plugin)
         {
-            _plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
+            if (plugin == null) throw new ArgumentNullException(nameof(plugin));
+            _processAudio = plugin.ProcessAudio;
+            _setTransportState = plugin.SetTransportState;
+            _resetTransportPosition = plugin.ResetTransportPosition;
+        }
+
+        /// <summary>
+        /// Recommended constructor – uses ThreadedVst3Wrapper.
+        /// State changes (transport start/stop) are posted through the lock-free SPSC queue
+        /// and applied by the audio thread before the next block, so the UI thread never waits.
+        /// </summary>
+        public WhiteNoiseProcessor(ThreadedVst3Wrapper plugin)
+        {
+            if (plugin == null) throw new ArgumentNullException(nameof(plugin));
+            _processAudio = plugin.ProcessAudio;
+            _setTransportState = plugin.SetTransportState;
+            _resetTransportPosition = plugin.ResetTransportPosition;
         }
 
         public void Start()
         {
             if (IsPlaying || _disposed) return;
 
-            // Notify the plugin that transport is playing so ProcessContext.state
-            // is set correctly and the editor UI reacts to playback.
-            _plugin.SetTransportState(true);
+            // SetTransportState goes through the SPSC queue to the audio thread.
+            _setTransportState(true);
 
-            _cancellationTokenSource = new CancellationTokenSource();
-            _processingTask = Task.Run(() => ProcessAudioLoop(_cancellationTokenSource.Token));
+            _cts = new CancellationTokenSource();
+            _audioThread = new Thread(() => AudioThreadProc(_cts.Token))
+            {
+                Name = "VST Audio Thread",
+                IsBackground = true,
+                Priority = ThreadPriority.AboveNormal
+            };
+            _audioThread.Start();
         }
 
         public void Stop()
         {
             if (!IsPlaying || _disposed) return;
 
-            _cancellationTokenSource?.Cancel();
-            _processingTask?.Wait(1000);
-            _cancellationTokenSource?.Dispose();
-            _cancellationTokenSource = null;
-            _processingTask = null;
+            _cts?.Cancel();
+            _audioThread?.Join(1000);
+            _cts?.Dispose();
+            _cts = null;
+            _audioThread = null;
 
-            // Reset transport state so the plugin knows playback stopped.
-            _plugin.SetTransportState(false);
-            _plugin.ResetTransportPosition();
+            _setTransportState(false);
+            _resetTransportPosition();
         }
 
-        private void ProcessAudioLoop(CancellationToken cancellationToken)
+        /// <summary>
+        /// Audio processing loop – runs on its own dedicated thread, never on the UI thread.
+        /// Buffers are pre-allocated here so there are no heap allocations inside the loop.
+        /// </summary>
+        private void AudioThreadProc(CancellationToken ct)
         {
             const int sampleRate = 44100;
             const int bufferSize = 512;
             const int channels = 2;
-            const double duration = 60.0; // 60 seconds
+            const double duration = 60.0;
 
             int totalSamples = (int)(sampleRate * duration);
-            int samplesProcessed = 0;
+            int processed = 0;
 
-            // Allocate buffers
-            float[][] inputBuffers = new float[channels][];
-            float[][] outputBuffers = new float[channels][];
-
-            for (int i = 0; i < channels; i++)
+            // Pre-allocate buffers once – zero allocations inside the loop.
+            float[][] inputs = new float[channels][];
+            float[][] outputs = new float[channels][];
+            for (int ch = 0; ch < channels; ch++)
             {
-                inputBuffers[i] = new float[bufferSize];
-                outputBuffers[i] = new float[bufferSize];
+                inputs[ch] = new float[bufferSize];
+                outputs[ch] = new float[bufferSize];
             }
 
-            while (!cancellationToken.IsCancellationRequested && samplesProcessed < totalSamples)
+            while (!ct.IsCancellationRequested && processed < totalSamples)
             {
-                int samplesToProcess = Math.Min(bufferSize, totalSamples - samplesProcessed);
+                int count = Math.Min(bufferSize, totalSamples - processed);
 
-                // Generate white noise
+                // Generate white noise in-place (no allocation).
                 for (int ch = 0; ch < channels; ch++)
-                {
-                    for (int i = 0; i < samplesToProcess; i++)
-                    {
-                        // Generate white noise: random values between -0.5 and 0.5
-                        inputBuffers[ch][i] = (float)(_random.NextDouble() - 0.5) * 0.3f; // Reduced amplitude
-                    }
-                }
+                    for (int i = 0; i < count; i++)
+                        inputs[ch][i] = (float)(_random.NextDouble() - 0.5) * 0.3f;
 
-                // Process through VST plugin
-                try
-                {
-                    _plugin.ProcessAudio(inputBuffers, outputBuffers, channels, samplesToProcess);
-                }
-                catch
-                {
-                    // Ignore processing errors
-                }
+                try { _processAudio(inputs, outputs, channels, count); }
+                catch { /* ignore transient errors */ }
 
-                samplesProcessed += samplesToProcess;
+                processed += count;
 
-                // Simulate real-time playback timing
-                Thread.Sleep((int)(samplesToProcess * 1000.0 / sampleRate));
+                // Simulate real-time pacing (sleep is acceptable here – this is a demo).
+                Thread.Sleep((int)(count * 1000.0 / sampleRate));
             }
         }
 
         public void Dispose()
         {
             if (_disposed) return;
-
             Stop();
             _disposed = true;
         }

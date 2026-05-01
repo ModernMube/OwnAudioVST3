@@ -160,6 +160,9 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("user32.dll")]
         private static extern bool WaitMessage();
 
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        private static extern bool UnregisterClass(string lpClassName, IntPtr hInstance);
+
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         #endregion
@@ -384,13 +387,19 @@ namespace OwnVST3Host.NativeWindow
                 _disposed = true;
 
                 if (_hwnd != IntPtr.Zero)
-                {
                     Close();
-                }
 
                 _windowThread?.Join(5000);
-                _windowCreated.Dispose();
 
+                // Each instance registers its own window class — unregister it to avoid leaking
+                // kernel objects in long-running host processes that load many plugins.
+                if (_windowClassName != null)
+                {
+                    UnregisterClass(_windowClassName, GetModuleHandle(null));
+                    _windowClassName = null;
+                }
+
+                _windowCreated.Dispose();
                 GC.SuppressFinalize(this);
             }
         }
