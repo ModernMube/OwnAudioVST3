@@ -116,7 +116,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         });
 
     public Task<EditorSize?> GetEditorSizeAsync() =>
-        PostCommand(() => _inner.GetEditorSize());
+        Task.FromResult(_inner.GetEditorSize());
 
     public Task<int> GetParameterCountAsync() =>
         PostCommand(() => _inner.GetParameterCount());

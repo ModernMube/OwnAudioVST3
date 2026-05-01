@@ -49,7 +49,7 @@ namespace OwnVST3Host.NativeWindow
         {
             if (threaded == null) throw new ArgumentNullException(nameof(threaded));
             _vst3Wrapper = threaded.InnerWrapper;
-            _getEditorSizeAsync = threaded.GetEditorSizeAsync;
+            _getEditorSizeAsync = () => Task.FromResult(_vst3Wrapper.GetEditorSize());
         }
 
         // ------------------------------------------------------------------
