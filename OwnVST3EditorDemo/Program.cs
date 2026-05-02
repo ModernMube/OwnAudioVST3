@@ -164,11 +164,8 @@ public class MainWindow : Window
         }
     }
 
-    // -------------------------------------------------------------------------
     // Plugin selection – async so the UI thread is never blocked.
     // LoadPlugin and Initialize run on the dedicated VST plugin thread.
-    // -------------------------------------------------------------------------
-
     private async void OnPluginSelected(object? sender, SelectionChangedEventArgs e)
     {
         if (_pluginList.SelectedItem is not PluginItem item)
@@ -177,7 +174,6 @@ public class MainWindow : Window
             return;
         }
 
-        // Clean up the previous plugin (this disposes the inner OwnVst3Wrapper too).
         CleanupCurrentPlugin();
 
         _statusText.Text = $"Loading {item.Name}…";
@@ -234,10 +230,7 @@ public class MainWindow : Window
         }
     }
 
-    // -------------------------------------------------------------------------
     // Playback (audio runs on a dedicated audio thread inside WhiteNoiseProcessor)
-    // -------------------------------------------------------------------------
-
     private void OnPlayClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (_plugin == null) return;
@@ -276,10 +269,7 @@ public class MainWindow : Window
         }
     }
 
-    // -------------------------------------------------------------------------
     // Editor (CreateEditor/CloseEditor stay on the UI thread per VST3 + macOS requirement)
-    // -------------------------------------------------------------------------
-
     private async void OnOpenEditorClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
         if (_plugin == null) return;
@@ -299,8 +289,7 @@ public class MainWindow : Window
 
             string pluginName = await _plugin.GetNameAsync();
 
-            // OpenEditorAsync fetches the editor size on the plugin thread (non-blocking),
-            // then opens the window and calls CreateEditor on the UI thread.
+            // OpenEditorAsync fetches the editor size on the plugin thread (non-blocking).
             await _editorController.OpenEditorAsync(pluginName);
 
             _openEditorButton.Content = "Close Editor";
@@ -312,10 +301,8 @@ public class MainWindow : Window
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
 
+    // Helpers
     private void UpdatePluginInfo(string name, string vendor, string? version,
         bool isInstrument, bool isEffect, int paramCount, EditorSize? editorSize)
     {

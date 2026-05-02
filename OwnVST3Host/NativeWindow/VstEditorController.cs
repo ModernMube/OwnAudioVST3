@@ -25,6 +25,13 @@ namespace OwnVST3Host.NativeWindow
         private CancellationTokenSource? _idleCancellation;
         private bool _disposed;
 
+        // Throttle flag: 0 = idle slot free, 1 = a BeginInvoke(ProcessIdle) is already
+        // queued on the main RunLoop but has not executed yet.
+        // This prevents callback accumulation during macOS modal tracking loops
+        // (e.g. dropdown menus), which would cause a UI flood/freeze the moment
+        // the menu closes.
+        private volatile int _idlePending; // 0 or 1
+
         private const int IdleIntervalMs = 20; // 50 Hz
 
         // ------------------------------------------------------------------
@@ -206,6 +213,13 @@ namespace OwnVST3Host.NativeWindow
         /// Dedicated idle thread: calls ProcessIdle at 50 Hz, independent of the ThreadPool.
         /// On macOS, BeginInvoke marshals to the main run loop via CFRunLoopTimer so that
         /// plugin dropdown menus work even under heavy background load.
+        ///
+        /// Throttle: at most ONE ProcessIdle callback is pending on the RunLoop at any
+        /// time (_idlePending flag). During macOS modal tracking (dropdown menu) the
+        /// main thread is blocked in NSEventTrackingRunLoopMode and cannot drain the
+        /// queued callbacks. Without the flag, the idle thread would keep adding new
+        /// CFRunLoopTimers every 20 ms; when the menu closes they all fire at once,
+        /// flooding the JUCE timer loop and causing the apparent UI freeze.
         /// </summary>
         private void IdleThreadProc(object? state)
         {
@@ -216,8 +230,19 @@ namespace OwnVST3Host.NativeWindow
                 {
                     try
                     {
-                        if (!_disposed && _nativeWindow != null)
-                            _nativeWindow.BeginInvoke(() => _vst3Wrapper.ProcessIdle());
+                        // Only post a new idle callback if the previous one has already run.
+                        if (!_disposed && _nativeWindow != null &&
+                            Interlocked.CompareExchange(ref _idlePending, 1, 0) == 0)
+                        {
+                            var win = _nativeWindow; // capture before lambda
+                            win?.BeginInvoke(() =>
+                            {
+                                try { _vst3Wrapper.ProcessIdle(); }
+                                catch (Exception ex)
+                                { Console.WriteLine($"[VST Editor] ProcessIdle error: {ex.Message}"); }
+                                finally { Interlocked.Exchange(ref _idlePending, 0); }
+                            });
+                        }
                     }
                     catch (Exception ex)
                     {

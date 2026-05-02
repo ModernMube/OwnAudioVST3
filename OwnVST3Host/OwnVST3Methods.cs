@@ -150,17 +150,17 @@ namespace OwnVST3Host
                 if (channels != _preallocChannels)
                 {
                     // Release previous pinned arrays before reallocating.
-                    if (_inputPtrsHandle.IsAllocated)  _inputPtrsHandle.Free();
+                    if (_inputPtrsHandle.IsAllocated) _inputPtrsHandle.Free();
                     if (_outputPtrsHandle.IsAllocated) _outputPtrsHandle.Free();
 
-                    _inputHandles  = new GCHandle[channels];
+                    _inputHandles = new GCHandle[channels];
                     _outputHandles = new GCHandle[channels];
-                    _inputPtrs     = new IntPtr[channels];
-                    _outputPtrs    = new IntPtr[channels];
+                    _inputPtrs = new IntPtr[channels];
+                    _outputPtrs = new IntPtr[channels];
 
                     // Pin the IntPtr arrays permanently — they are owned by this object
                     // and their address is passed to native code on every ProcessAudio call.
-                    _inputPtrsHandle  = GCHandle.Alloc(_inputPtrs,  GCHandleType.Pinned);
+                    _inputPtrsHandle = GCHandle.Alloc(_inputPtrs, GCHandleType.Pinned);
                     _outputPtrsHandle = GCHandle.Alloc(_outputPtrs, GCHandleType.Pinned);
 
                     _preallocChannels = channels;
@@ -181,18 +181,9 @@ namespace OwnVST3Host
         {
             CheckDisposed();
 
-            // Clamp the channel count to what the plugin's primary bus actually accepts.
-            // Previously this guard completely bypassed the plugin on any mismatch
-            // (e.g. stereo host sending 2 ch to a plugin whose actualInputChannels was
-            // 4 because sidechain buses were erroneously summed in the native layer).
-            // Now we send only as many channels as the plugin declared for bus 0.
-            int actualIn  = ActualInputChannels;
+            int actualIn = ActualInputChannels;
             int actualOut = ActualOutputChannels;
 
-            // Channels to pass to the plugin: limited to what the plugin supports and
-            // what the caller provided.
-            // Clamp to what the plugin declared AND what we pre-allocated in Initialize().
-            // _preallocChannels == 0 means Initialize was never called: fall through to pass-through.
             int pluginChannels = Math.Min(numChannels, Math.Min(actualIn, actualOut));
             pluginChannels = Math.Min(pluginChannels, _preallocChannels);
 
@@ -205,26 +196,23 @@ namespace OwnVST3Host
                 return false;
             }
 
-            // Use pre-allocated arrays from Initialize() to avoid per-callback heap allocations.
-            // GCHandle.Alloc does not allocate GC memory — it only registers a GC root.
-            // The IntPtr[] arrays (_inputPtrs, _outputPtrs) are permanently pinned.
-            var inputHandles  = _inputHandles;
+            var inputHandles = _inputHandles;
             var outputHandles = _outputHandles;
 
             for (int i = 0; i < pluginChannels; i++)
             {
-                inputHandles[i]  = GCHandle.Alloc(inputs[i],  GCHandleType.Pinned);
+                inputHandles[i] = GCHandle.Alloc(inputs[i], GCHandleType.Pinned);
                 outputHandles[i] = GCHandle.Alloc(outputs[i], GCHandleType.Pinned);
-                _inputPtrs[i]    = inputHandles[i].AddrOfPinnedObject();
-                _outputPtrs[i]   = outputHandles[i].AddrOfPinnedObject();
+                _inputPtrs[i] = inputHandles[i].AddrOfPinnedObject();
+                _outputPtrs[i] = outputHandles[i].AddrOfPinnedObject();
             }
 
             AudioBufferC buffer = new AudioBufferC
             {
-                inputs     = _inputPtrsHandle.AddrOfPinnedObject(),
-                outputs    = _outputPtrsHandle.AddrOfPinnedObject(),
+                inputs = _inputPtrsHandle.AddrOfPinnedObject(),
+                outputs = _outputPtrsHandle.AddrOfPinnedObject(),
                 numChannels = pluginChannels,
-                numSamples  = numSamples
+                numSamples = numSamples
             };
 
             bool result = _processAudioFunc(_pluginHandle, ref buffer);
@@ -350,14 +338,14 @@ namespace OwnVST3Host
         /// </summary>
         public string? Version
         {
-           get
-           {
-               CheckDisposed();
-               if (_getVersionFunc == null)
-                   return null; // Function not available in this version of the native library
-               IntPtr versionPtr = _getVersionFunc(_pluginHandle);
-               return Marshal.PtrToStringAnsi(versionPtr);
-           }
+            get
+            {
+                CheckDisposed();
+                if (_getVersionFunc == null)
+                    return null; // Function not available in this version of the native library
+                IntPtr versionPtr = _getVersionFunc(_pluginHandle);
+                return Marshal.PtrToStringAnsi(versionPtr);
+            }
         }
 
         /// <summary>

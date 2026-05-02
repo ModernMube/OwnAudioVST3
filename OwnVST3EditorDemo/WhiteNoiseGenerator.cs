@@ -24,7 +24,9 @@ namespace OwnVST3EditorDemo
 
         public bool IsPlaying => _audioThread?.IsAlive ?? false;
 
-        /// <summary>Legacy constructor – uses OwnVst3Wrapper directly.</summary>
+        /// <summary>
+        /// Legacy constructor – uses OwnVst3Wrapper directly.
+        /// </summary>
         public WhiteNoiseProcessor(OwnVst3Wrapper plugin)
         {
             if (plugin == null) throw new ArgumentNullException(nameof(plugin));
@@ -110,7 +112,7 @@ namespace OwnVST3EditorDemo
                         inputs[ch][i] = (float)(_random.NextDouble() - 0.5) * 0.3f;
 
                 try { _processAudio(inputs, outputs, channels, count); }
-                catch { /* ignore transient errors */ }
+                catch { }
 
                 processed += count;
 

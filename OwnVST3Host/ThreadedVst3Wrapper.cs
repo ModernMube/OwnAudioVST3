@@ -44,9 +44,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     private volatile int _actualIn = 2;
     private volatile int _actualOut = 2;
 
-    // -------------------------------------------------------------------------
-    // Public state API – safe to read from any thread, zero allocation.
-    // -------------------------------------------------------------------------
+    #region Public state API – safe to read from any thread, zero allocation.
 
     /// <summary>Current lifecycle state. Safe to read from any thread at any time.</summary>
     public VstPluginState State => (VstPluginState)Volatile.Read(ref _state);
@@ -84,9 +82,9 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         _pluginThread.Start();
     }
 
-    // -------------------------------------------------------------------------
-    // Async plugin operations – all execute on the dedicated plugin thread.
-    // -------------------------------------------------------------------------
+    #endregion
+
+    #region Async plugin operations – all execute on the dedicated plugin thread.
 
     public Task<bool> LoadPluginAsync(string pluginPath) =>
         PostCommand(() =>
@@ -104,7 +102,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             bool ok = _inner.Initialize(sampleRate, maxBlockSize);
             if (ok)
             {
-                _actualIn  = _inner.ActualInputChannels;
+                _actualIn = _inner.ActualInputChannels;
                 _actualOut = _inner.ActualOutputChannels;
                 Interlocked.Exchange(ref _state, (int)VstPluginState.Ready);
             }
@@ -151,16 +149,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     public Task<string> GetPluginInfoAsync() =>
         PostCommand(() => _inner.PluginInfo);
 
-    // -------------------------------------------------------------------------
-    // UI → Audio lock-free state changes.
-    // Enqueue to the SPSC queue; the audio thread drains it before each block.
-    // If the queue is full the change is logged and dropped — the queue has 512
-    // slots and is drained every ~11 ms at 44100/512, so a full queue indicates
-    // a bug in the caller (sending thousands of changes per second).
-    // The previous fallback (route to plugin thread) was removed because it caused
-    // a data race: _inner.SetParameter on the plugin thread is concurrent with
-    // _inner.ProcessAudio on the audio thread, which is unsafe.
-    // -------------------------------------------------------------------------
+    #endregion
 
     /// <summary>
     /// Sets a parameter value from the UI thread.
@@ -172,30 +161,34 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             Console.WriteLine($"[ThreadedVst3Wrapper] SPSC queue full — SetParameter({paramId}) dropped.");
     }
 
-    /// <summary>Sets the playback tempo from the UI thread.</summary>
+    /// <summary>
+    /// Sets the playback tempo from the UI thread.
+    /// </summary>
     public void SetTempo(double bpm)
     {
         if (!_stateQueue.TryEnqueue(VstStateChange.ForTempo(bpm)))
             Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — SetTempo dropped.");
     }
 
-    /// <summary>Sets the transport playing state from the UI thread.</summary>
+    /// <summary>
+    /// Sets the transport playing state from the UI thread.
+    /// </summary>
     public void SetTransportState(bool isPlaying)
     {
         if (!_stateQueue.TryEnqueue(VstStateChange.ForTransport(isPlaying)))
             Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — SetTransportState dropped.");
     }
 
-    /// <summary>Resets the transport position from the UI thread.</summary>
+    /// <summary>
+    /// Resets the transport position from the UI thread.
+    /// </summary>
     public void ResetTransportPosition()
     {
         if (!_stateQueue.TryEnqueue(VstStateChange.ForResetTransport()))
             Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — ResetTransportPosition dropped.");
     }
 
-    // -------------------------------------------------------------------------
-    // Audio-thread direct calls (zero-overhead after first block).
-    // -------------------------------------------------------------------------
+    #region Audio-thread direct calls (zero-overhead after first block).
 
     /// <summary>
     /// Processes audio. Call directly from the audio thread.
@@ -239,18 +232,22 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         }
     }
 
-    /// <summary>Sends a MIDI event from the audio thread.</summary>
+    /// <summary>
+    /// Sends a MIDI event from the audio thread.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool SendMidiEvent(byte status, byte data1, byte data2) =>
         _inner.SendMidiEvent(status, data1, data2);
 
-    /// <summary>Processes MIDI events from the audio thread.</summary>
+    /// <summary>
+    /// Processes MIDI events from the audio thread.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool ProcessMidi(MidiEvent[] events) => _inner.ProcessMidi(events);
 
-    // -------------------------------------------------------------------------
-    // Editor / idle – these must stay on the caller thread (see VstEditorController).
-    // -------------------------------------------------------------------------
+    #endregion
+
+    #region Editor / idle these must stay on the caller thread (see VstEditorController).
 
     /// <summary>
     /// Calls VST ProcessIdle. Invoked from the dedicated idle thread in VstEditorController.
@@ -258,11 +255,14 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     /// </summary>
     public void ProcessIdle() => _inner.ProcessIdle();
 
+    /// <summary>
+    /// Returns true if the plugin editor is open
+    /// </summary>
     public bool IsEditorOpen => _inner.IsEditorOpen;
 
-    // -------------------------------------------------------------------------
-    // Internal
-    // -------------------------------------------------------------------------
+    #endregion
+
+    #region Internal
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void DrainStateQueue()
@@ -292,7 +292,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         foreach (var cmd in _cmdQueue.GetConsumingEnumerable())
         {
             try { cmd(); }
-            catch { /* exceptions are captured inside each command via TaskCompletionSource */ }
+            catch { }
         }
     }
 
@@ -308,15 +308,13 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         return tcs.Task;
     }
 
+    #endregion
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
-        // If the audio thread is inside ProcessAudio, wait up to 100 ms for it to exit
-        // before freeing native resources. At 44100/512 (~11 ms/block) this covers
-        // several full callbacks. If it takes longer, we proceed anyway — the audio
-        // engine should have been stopped before Dispose() is called.
         var sw = System.Diagnostics.Stopwatch.StartNew();
         while (Volatile.Read(ref _state) == (int)VstPluginState.Processing
                && sw.ElapsedMilliseconds < 100)
@@ -333,10 +331,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         GC.SuppressFinalize(this);
     }
 }
-
-// ---------------------------------------------------------------------------
-// SPSC queue item types
-// ---------------------------------------------------------------------------
 
 internal enum VstChangeType : byte
 {
