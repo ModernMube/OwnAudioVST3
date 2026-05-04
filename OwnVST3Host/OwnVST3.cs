@@ -52,8 +52,7 @@ namespace OwnVST3Host
         private VST3Plugin_SetTransportStateDelegate? _setTransportStateFunc;
         private VST3Plugin_ResetTransportPositionDelegate? _resetTransportPositionFunc;
 
-        // Pre-allocated audio buffer handles — reused every ProcessAudio call to
-        // eliminate per-callback heap allocations. Allocated in Initialize().
+        
         private GCHandle[] _inputHandles  = Array.Empty<GCHandle>();
         private GCHandle[] _outputHandles = Array.Empty<GCHandle>();
         private IntPtr[]   _inputPtrs     = Array.Empty<IntPtr>();
@@ -80,17 +79,14 @@ namespace OwnVST3Host
         /// <param name="dllPath">Path to the ownvst3 native library</param>
         public OwnVst3Wrapper(string dllPath)
         {
-            // Load the DLL using NativeLibrary.Load
             _libraryHandle = NativeLibrary.Load(dllPath);
             if (_libraryHandle == IntPtr.Zero)
             {
                 throw new DllNotFoundException($"Failed to load library: {dllPath}");
             }
 
-            // Initialize delegates from the loaded DLL
             InitializeDelegates();
 
-            // Create the plugin instance
             _pluginHandle = _createFunc();
             if (_pluginHandle == IntPtr.Zero)
             {
@@ -323,6 +319,15 @@ namespace OwnVST3Host
 
         #endregion
 
+        /// <summary>
+        /// Set to the UI thread's SynchronizationContext before loading any VST plugin.
+        /// On macOS, <see cref="Dispose()"/> uses this to execute _destroyFunc on the main
+        /// thread, preventing JUCE timer-callback use-after-free crashes (EXC_BAD_ACCESS).
+        /// Set this once on app startup, e.g. in OnFrameworkInitializationCompleted():
+        ///   OwnVst3Wrapper.MainThreadSyncContext = SynchronizationContext.Current;
+        /// </summary>
+        public static SynchronizationContext? MainThreadSyncContext { get; set; }
+
         #region IDisposable implementation
 
         ~OwnVst3Wrapper()
@@ -346,8 +351,18 @@ namespace OwnVST3Host
 
                 if (_pluginHandle != IntPtr.Zero)
                 {
-                    _destroyFunc(_pluginHandle);
-                    _pluginHandle = IntPtr.Zero;
+                    if (OperatingSystem.IsMacOS() && MainThreadSyncContext != null)
+                    {
+                        var handle = _pluginHandle;
+                        var fn = _destroyFunc;
+                        _pluginHandle = IntPtr.Zero;
+                        MainThreadSyncContext.Send(_ => fn(handle), null);
+                    }
+                    else
+                    {
+                        _destroyFunc(_pluginHandle);
+                        _pluginHandle = IntPtr.Zero;
+                    }
                 }
 
                 if (_libraryHandle != IntPtr.Zero)
