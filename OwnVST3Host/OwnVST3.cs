@@ -320,13 +320,47 @@ namespace OwnVST3Host
         #endregion
 
         /// <summary>
-        /// Set to the UI thread's SynchronizationContext before loading any VST plugin.
-        /// On macOS, <see cref="Dispose()"/> uses this to execute _destroyFunc on the main
-        /// thread, preventing JUCE timer-callback use-after-free crashes (EXC_BAD_ACCESS).
-        /// Set this once on app startup, e.g. in OnFrameworkInitializationCompleted():
-        ///   OwnVst3Wrapper.MainThreadSyncContext = SynchronizationContext.Current;
+        /// No-op on current versions. Kept for source compatibility.
+        /// macOS plugin destruction now uses dispatch_async_f as a drain signal only;
+        /// _destroyFunc is called on the background thread so the main thread stays free
+        /// for any dispatch_sync(main_queue,...) calls the plugin makes during teardown.
         /// </summary>
         public static SynchronizationContext? MainThreadSyncContext { get; set; }
+
+        #region macOS GCD drain-signal helpers
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern IntPtr dispatch_get_main_queue();
+
+        [DllImport("libSystem.B.dylib")]
+        private static extern void dispatch_async_f(IntPtr queue, IntPtr context, IntPtr work);
+
+        // Returns 1 when called from the main thread.
+        [DllImport("libSystem.B.dylib")]
+        private static extern int pthread_main_np();
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate void DispatchWorkFunc(IntPtr context);
+
+        // Static pinned delegate — lives for the process lifetime.
+        private static readonly DispatchWorkFunc s_drainSignal = DrainSignalCallback;
+        private static readonly IntPtr s_drainSignalPtr =
+            Marshal.GetFunctionPointerForDelegate(s_drainSignal);
+
+        private sealed class DrainContext
+        {
+            public readonly SemaphoreSlim Done = new SemaphoreSlim(0, 1);
+        }
+
+        private static void DrainSignalCallback(IntPtr ctxPtr)
+        {
+            var gcHandle = GCHandle.FromIntPtr(ctxPtr);
+            var ctx = (DrainContext)gcHandle.Target!;
+            gcHandle.Free();
+            try { ctx.Done.Release(); } catch { }
+        }
+
+        #endregion
 
         #region IDisposable implementation
 
@@ -351,12 +385,17 @@ namespace OwnVST3Host
 
                 if (_pluginHandle != IntPtr.Zero)
                 {
-                    if (OperatingSystem.IsMacOS() && MainThreadSyncContext != null)
+                    if (OperatingSystem.IsMacOS() && pthread_main_np() == 0)
                     {
-                        var handle = _pluginHandle;
-                        var fn = _destroyFunc;
+                        var ctx = new DrainContext();
+                        var gcHandle = GCHandle.Alloc(ctx);
+                        dispatch_async_f(dispatch_get_main_queue(),
+                                         GCHandle.ToIntPtr(gcHandle),
+                                         s_drainSignalPtr);
+                        ctx.Done.Wait(5000);
+
+                        _destroyFunc(_pluginHandle);
                         _pluginHandle = IntPtr.Zero;
-                        MainThreadSyncContext.Send(_ => fn(handle), null);
                     }
                     else
                     {
