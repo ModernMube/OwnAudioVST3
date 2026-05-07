@@ -33,23 +33,16 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     private readonly BlockingCollection<Action> _cmdQueue;
     private readonly LockFreeQueue<VstStateChange> _stateQueue;
 
-    // _disposed: written once (true) by Dispose, read from any thread.
     private volatile bool _disposed;
 
-    // _state: only modified via Interlocked, read via Volatile.Read. Backing field for State.
     private int _state = (int)VstPluginState.NotLoaded;
 
-    // Cached after InitializeAsync so the audio thread can read channel counts
-    // without posting a command. Written on plugin thread, read on audio thread (volatile).
     private volatile int _actualIn = 2;
     private volatile int _actualOut = 2;
 
     #region Public state API – safe to read from any thread, zero allocation.
 
-    /// <summary>Current lifecycle state. Safe to read from any thread at any time.</summary>
     public VstPluginState State => (VstPluginState)Volatile.Read(ref _state);
-
-    /// <summary>True when the plugin is in Ready or Processing state (can process audio).</summary>
     public bool IsReady
     {
         get
@@ -206,13 +199,10 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     {
         if (_disposed) return false;
 
-        // Atomically claim the Processing slot. Only one audio thread should ever call
-        // this, so contention here means a caller bug.
         if (Interlocked.CompareExchange(ref _state, (int)VstPluginState.Processing, (int)VstPluginState.Ready)
             != (int)VstPluginState.Ready)
             return false;
 
-        // Second disposed check: Dispose() could have run between the first check and the CAS.
         if (_disposed)
         {
             Interlocked.Exchange(ref _state, (int)VstPluginState.NotLoaded);
@@ -226,8 +216,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         }
         finally
         {
-            // Restore Ready. If Dispose() ran concurrently it may have already set
-            // NotLoaded — CompareExchange leaves that intact.
             Interlocked.CompareExchange(ref _state, (int)VstPluginState.Ready, (int)VstPluginState.Processing);
         }
     }

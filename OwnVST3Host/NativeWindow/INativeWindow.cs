@@ -3,61 +3,61 @@ using System;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// Interfész natív ablakkezeléshez VST3 pluginok számára.
-    /// Platform-független absztrakció Windows, macOS és Linux rendszerekhez.
+    /// Interface for native window management for VST3 plugins.
+    /// Platform-independent abstraction for Windows, macOS and Linux.
     /// </summary>
     public interface INativeWindow : IDisposable
     {
         /// <summary>
-        /// Ablak létrehozása és megjelenítése
+        /// Creates and displays the window.
         /// </summary>
-        /// <param name="title">Ablak címe</param>
-        /// <param name="width">Ablak szélessége pixelben</param>
-        /// <param name="height">Ablak magassága pixelben</param>
+        /// <param name="title">Window title</param>
+        /// <param name="width">Window width in pixels</param>
+        /// <param name="height">Window height in pixels</param>
         void Open(string title, int width, int height);
 
         /// <summary>
-        /// Ablak bezárása
+        /// Closes the window.
         /// </summary>
         void Close();
 
         /// <summary>
-        /// Natív ablakkezelő visszaadása (HWND Windows-on, NSView* macOS-en, Window ID Linux-on)
+        /// Returns the native window handle.
+        /// (HWND on Windows, NSView* on macOS, Window ID on Linux).
         /// </summary>
-        /// <returns>Platform-specifikus ablak handle</returns>
+        /// <returns>Platform-specific window handle</returns>
         IntPtr GetHandle();
 
         /// <summary>
-        /// Ellenőrzi, hogy az ablak nyitva van-e
+        /// Gets a value indicating whether the window is currently open.
         /// </summary>
         bool IsOpen { get; }
 
         /// <summary>
-        /// Ellenőrzi, hogy az ablak aktív-e (key window / foreground window)
-        /// Ez használható a VST dropdown menük bezárásának detektálására
+        /// Gets a value indicating whether the window is active (key/foreground window).
+        /// Useful for detecting when VST dropdown menus are closed.
         /// </summary>
         bool IsActive { get; }
 
         /// <summary>
-        /// Esemény, amely akkor hívódik meg, amikor az ablak átméretezésre kerül
+        /// Event triggered when the window is resized.
         /// </summary>
         event Action<int, int>? OnResize;
 
         /// <summary>
-        /// Esemény, amely akkor hívódik meg, amikor az ablak bezárul
+        /// Event triggered when the window is closed.
         /// </summary>
         event Action? OnClosed;
 
         /// <summary>
-        /// Szinkron módon végrehajt egy műveletet az ablak szálán.
-        /// Windows-on ez a dedikált ablak szálra marshalja a hívást,
-        /// macOS-en és Linux-on közvetlenül végrehajtja.
+        /// Synchronously executes an action on the window's thread.
+        /// On Windows it marshals to the UI thread, on others executes directly.
         /// </summary>
         void Invoke(Action action);
 
         /// <summary>
-        /// Aszinkron módon végrehajt egy műveletet az ablak szálán.
-        /// Nem vár a művelet befejezésére.
+        /// Asynchronously executes an action on the window's thread.
+        /// Does not wait for the action to complete.
         /// </summary>
         void BeginInvoke(Action action);
     }

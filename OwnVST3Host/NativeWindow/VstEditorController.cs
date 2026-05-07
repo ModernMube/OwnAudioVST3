@@ -1,47 +1,62 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
     /// Controller for managing a VST plugin editor window.
-    ///
-    /// Threading model:
-    ///   Native window thread – HWND/NSWindow lives here with its own OS message loop.
-    ///   Caller (UI) thread   – CreateEditor / CloseEditor run here (VST3 requirement: the
-    ///                          plugin's attached()/removed() callbacks must be on the same
-    ///                          thread that created the host view).
-    ///   Idle thread          – dedicated high-priority thread that calls ProcessIdle at 50 Hz.
-    ///
-    /// When constructed from a ThreadedVst3Wrapper, GetEditorSize is fetched asynchronously
-    /// on the plugin thread so that OpenEditorAsync never blocks the UI thread.
+    /// Manages native window thread, caller thread synchronization, and idle processing.
+    /// Uses dedicated threads for UI and idle operations to prevent deadlocks.
     /// </summary>
     public class VstEditorController : IDisposable
     {
+        /// <summary>
+        /// The inner VST3 wrapper instance.
+        /// </summary>
         private readonly OwnVst3Wrapper _vst3Wrapper;
-        private readonly Func<Task<EditorSize?>> _getEditorSizeAsync;
-
-        private INativeWindow? _nativeWindow;
-        private Thread? _idleThread;
-        private CancellationTokenSource? _idleCancellation;
-        private bool _disposed;
-
-        // Throttle flag: 0 = idle slot free, 1 = a BeginInvoke(ProcessIdle) is already
-        // queued on the main RunLoop but has not executed yet.
-        // This prevents callback accumulation during macOS modal tracking loops
-        // (e.g. dropdown menus), which would cause a UI flood/freeze the moment
-        // the menu closes.
-        private volatile int _idlePending; // 0 or 1
-
-        private const int IdleIntervalMs = 20; // 50 Hz
-
-        // ------------------------------------------------------------------
-        // Constructors
-        // ------------------------------------------------------------------
 
         /// <summary>
-        /// Backward-compatible constructor. GetEditorSize is fetched synchronously
-        /// (wraps the blocking call in a completed Task).
+        /// Function to asynchronously retrieve the editor size.
         /// </summary>
+        private readonly Func<Task<EditorSize?>> _getEditorSizeAsync;
+
+        /// <summary>
+        /// The native window instance.
+        /// </summary>
+        private INativeWindow? _nativeWindow;
+
+        /// <summary>
+        /// The dedicated idle processing thread.
+        /// </summary>
+        private Thread? _idleThread;
+
+        /// <summary>
+        /// Token source for canceling the idle thread.
+        /// </summary>
+        private CancellationTokenSource? _idleCancellation;
+
+        /// <summary>
+        /// Indicates whether the object has been disposed.
+        /// </summary>
+        private bool _disposed;
+
+        /// <summary>
+        /// Throttle flag for pending idle processing invocations.
+        /// Value is 0 if free, 1 if a pending invocation exists.
+        /// </summary>
+        private volatile int _idlePending;
+
+        /// <summary>
+        /// Interval in milliseconds for the idle thread (50 Hz).
+        /// </summary>
+        private const int IdleIntervalMs = 20;
+
+        /// <summary>
+        /// Initializes a new instance of the VstEditorController class.
+        /// Wraps the synchronous size retrieval in a completed Task.
+        /// </summary>
+        /// <param name="vst3Wrapper">The VST3 wrapper instance.</param>
         public VstEditorController(OwnVst3Wrapper vst3Wrapper)
         {
             _vst3Wrapper = vst3Wrapper ?? throw new ArgumentNullException(nameof(vst3Wrapper));
@@ -49,9 +64,10 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Constructor for ThreadedVst3Wrapper. GetEditorSize is fetched asynchronously
-        /// on the dedicated plugin thread, so the UI thread is never blocked.
+        /// Initializes a new instance of the VstEditorController class for threaded wrappers.
+        /// Allows asynchronous editor size retrieval without blocking UI.
         /// </summary>
+        /// <param name="threaded">The threaded VST3 wrapper instance.</param>
         public VstEditorController(ThreadedVst3Wrapper threaded)
         {
             if (threaded == null) throw new ArgumentNullException(nameof(threaded));
@@ -59,59 +75,50 @@ namespace OwnVST3Host.NativeWindow
             _getEditorSizeAsync = () => Task.FromResult(_vst3Wrapper.GetEditorSize());
         }
 
-        // ------------------------------------------------------------------
-        // Public state
-        // ------------------------------------------------------------------
-
+        /// <summary>
+        /// Gets a value indicating whether the editor window is currently open.
+        /// </summary>
         public bool IsOpen => _nativeWindow?.IsOpen ?? false;
-        public bool IsEditorOpen => IsOpen;
 
-        // ------------------------------------------------------------------
-        // OpenEditor (synchronous – backward compatible)
-        // ------------------------------------------------------------------
+        /// <summary>
+        /// Gets a value indicating whether the editor is open.
+        /// </summary>
+        public bool IsEditorOpen => IsOpen;
 
         /// <summary>
         /// Opens the VST editor window synchronously.
-        /// The HWND/NSWindow is created on a dedicated native-window thread; CreateEditor
-        /// runs on the caller (UI) thread to satisfy the VST3/macOS threading requirement.
+        /// Creates the window on a dedicated native-window thread.
         /// </summary>
+        /// <param name="windowTitle">The title of the editor window.</param>
         public void OpenEditor(string windowTitle)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(VstEditorController));
             if (IsOpen) return;
 
-            // Synchronously fetch size (fast – just reads a cached value from the native lib).
             var editorSize = _vst3Wrapper.GetEditorSize() ?? new EditorSize(800, 600);
             OpenEditorCore(windowTitle, editorSize);
         }
 
-        // ------------------------------------------------------------------
-        // OpenEditorAsync (non-blocking – preferred when using ThreadedVst3Wrapper)
-        // ------------------------------------------------------------------
-
         /// <summary>
         /// Opens the VST editor window without blocking the UI thread.
-        /// GetEditorSize is awaited on the plugin thread; window creation and CreateEditor
-        /// still run on the caller (UI) thread to satisfy the VST3/macOS requirement.
+        /// Awaits size retrieval on the plugin thread.
         /// </summary>
+        /// <param name="windowTitle">The title of the editor window.</param>
         public async Task OpenEditorAsync(string windowTitle)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(VstEditorController));
             if (IsOpen) return;
 
-            // Fetch editor size on the plugin thread – does not block the UI thread.
             EditorSize? size = await _getEditorSizeAsync().ConfigureAwait(true);
-            // ConfigureAwait(true) → resumes on the original (UI) thread, which is required
-            // because the rest of this method calls CreateEditor on the UI thread.
 
             var editorSize = size ?? new EditorSize(800, 600);
             OpenEditorCore(windowTitle, editorSize);
         }
 
-        // ------------------------------------------------------------------
-        // CloseEditor
-        // ------------------------------------------------------------------
-
+        /// <summary>
+        /// Closes the VST editor window and releases related resources.
+        /// Also stops the background idle processing thread.
+        /// </summary>
         public void CloseEditor()
         {
             try
@@ -123,7 +130,6 @@ namespace OwnVST3Host.NativeWindow
                     var win = _nativeWindow;
                     _nativeWindow = null;
 
-                    // CloseEditor (VST removed()) runs on the caller (UI) thread.
                     try { _vst3Wrapper.CloseEditor(); }
                     catch (Exception ex)
                     { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
@@ -140,13 +146,12 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
-        // ------------------------------------------------------------------
-        // Internal helpers
-        // ------------------------------------------------------------------
-
         /// <summary>
-        /// Core window + editor setup. Must be called from the UI thread.
+        /// Core window and editor setup executed from the UI thread.
+        /// Initializes the native window and attaches the VST editor.
         /// </summary>
+        /// <param name="windowTitle">The title of the window.</param>
+        /// <param name="editorSize">The initial size of the editor.</param>
         private void OpenEditorCore(string windowTitle, EditorSize editorSize)
         {
             try
@@ -155,15 +160,10 @@ namespace OwnVST3Host.NativeWindow
                 _nativeWindow.OnClosed += OnWindowClosed;
                 _nativeWindow.OnResize += OnWindowResized;
 
-                // The native OS window is created on a dedicated thread (or the macOS main
-                // thread via dispatch_sync). After Open() returns the handle is ready.
                 _nativeWindow.Open(windowTitle, editorSize.Width, editorSize.Height);
 
                 IntPtr windowHandle = _nativeWindow.GetHandle();
 
-                // CRITICAL: CreateEditor runs on the CALLER (UI) thread.
-                // The native window thread pumps messages so plugin SendMessage calls are
-                // handled there, preventing cross-thread deadlocks.
                 bool success = _vst3Wrapper.CreateEditor(windowHandle);
                 if (!success)
                 {
@@ -180,6 +180,9 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Starts the dedicated background idle processing thread.
+        /// </summary>
         private void StartIdleThread()
         {
             _idleCancellation = new CancellationTokenSource();
@@ -192,6 +195,9 @@ namespace OwnVST3Host.NativeWindow
             _idleThread.Start(_idleCancellation.Token);
         }
 
+        /// <summary>
+        /// Stops the background idle processing thread and cleans up resources.
+        /// </summary>
         private void StopIdleThread()
         {
             if (_idleCancellation != null)
@@ -210,17 +216,10 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Dedicated idle thread: calls ProcessIdle at 50 Hz, independent of the ThreadPool.
-        /// On macOS, BeginInvoke marshals to the main run loop via CFRunLoopTimer so that
-        /// plugin dropdown menus work even under heavy background load.
-        ///
-        /// Throttle: at most ONE ProcessIdle callback is pending on the RunLoop at any
-        /// time (_idlePending flag). During macOS modal tracking (dropdown menu) the
-        /// main thread is blocked in NSEventTrackingRunLoopMode and cannot drain the
-        /// queued callbacks. Without the flag, the idle thread would keep adding new
-        /// CFRunLoopTimers every 20 ms; when the menu closes they all fire at once,
-        /// flooding the JUCE timer loop and causing the apparent UI freeze.
+        /// Procedure for the dedicated idle processing thread.
+        /// Periodically invokes ProcessIdle callbacks using the native window message loop.
         /// </summary>
+        /// <param name="state">The cancellation token state.</param>
         private void IdleThreadProc(object? state)
         {
             var ct = (CancellationToken)state!;
@@ -230,11 +229,11 @@ namespace OwnVST3Host.NativeWindow
                 {
                     try
                     {
-                        // Only post a new idle callback if the previous one has already run.
-                        if (!_disposed && _nativeWindow != null &&
+                        if (!OperatingSystem.IsMacOS() &&
+                            !_disposed && _nativeWindow != null &&
                             Interlocked.CompareExchange(ref _idlePending, 1, 0) == 0)
                         {
-                            var win = _nativeWindow; // capture before lambda
+                            var win = _nativeWindow;
                             win?.BeginInvoke(() =>
                             {
                                 try { _vst3Wrapper.ProcessIdle(); }
@@ -258,6 +257,10 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Handles the native window closed event.
+        /// Cleans up editor resources.
+        /// </summary>
         private void OnWindowClosed()
         {
             try
@@ -278,6 +281,12 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Handles the native window resized event.
+        /// Notifies the VST editor wrapper of the new dimensions.
+        /// </summary>
+        /// <param name="width">The new width.</param>
+        /// <param name="height">The new height.</param>
         private void OnWindowResized(int width, int height)
         {
             try { _vst3Wrapper.ResizeEditor(width, height); }
@@ -285,10 +294,9 @@ namespace OwnVST3Host.NativeWindow
             { Console.WriteLine($"[VST Editor] Resize error: {ex.Message}"); }
         }
 
-        // ------------------------------------------------------------------
-        // IDisposable
-        // ------------------------------------------------------------------
-
+        /// <summary>
+        /// Disposes of the native window resources.
+        /// </summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -299,6 +307,9 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Finalizes an instance of the VstEditorController class.
+        /// </summary>
         ~VstEditorController() => Dispose();
     }
 }

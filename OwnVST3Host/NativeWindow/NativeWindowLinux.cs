@@ -7,48 +7,112 @@ namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
     /// Linux native window management using X11.
-    ///
-    /// Threading model:
-    ///   Event loop thread – dedicated thread that owns the X11 display connection,
-    ///                       processes ConfigureNotify (resize) and ClientMessage
-    ///                       (WM_DELETE_WINDOW) events, and drains the invoke queue.
-    ///   Caller thread     – Open() blocks until the window is ready, then returns.
-    ///   Any thread        – Invoke() (sync) and BeginInvoke() (async) marshal work
-    ///                       to the event loop thread.
-    ///
-    /// X11 resources are always created and destroyed on the event loop thread.
+    /// Manages the X11 event loop thread, window creation, and event processing.
+    /// Provides cross-thread invocation capabilities for UI operations.
+    /// X11 resources are exclusively managed on the event loop thread.
     /// </summary>
     internal class NativeWindowLinux : INativeWindow
     {
+        /// <summary>
+        /// The X11 display pointer.
+        /// </summary>
         private IntPtr _display = IntPtr.Zero;
-        private IntPtr _window  = IntPtr.Zero;
-        private IntPtr _wmProtocols   = IntPtr.Zero;
+
+        /// <summary>
+        /// The X11 window pointer.
+        /// </summary>
+        private IntPtr _window = IntPtr.Zero;
+
+        /// <summary>
+        /// Atom for WM_PROTOCOLS.
+        /// </summary>
+        private IntPtr _wmProtocols = IntPtr.Zero;
+
+        /// <summary>
+        /// Atom for WM_DELETE_WINDOW.
+        /// </summary>
         private IntPtr _wmDeleteWindow = IntPtr.Zero;
 
+        /// <summary>
+        /// The thread running the X11 event loop.
+        /// </summary>
         private Thread? _eventThread;
+
+        /// <summary>
+        /// Flag indicating whether the event loop should terminate.
+        /// </summary>
         private volatile bool _shouldStop;
+
+        /// <summary>
+        /// Event used to signal when the window has been successfully created.
+        /// </summary>
         private readonly ManualResetEventSlim _windowReady = new(false);
+
+        /// <summary>
+        /// Queue for cross-thread invocations.
+        /// </summary>
         private readonly ConcurrentQueue<InvokeItem> _invokeQueue = new();
+
+        /// <summary>
+        /// The last known width of the window.
+        /// </summary>
         private int _lastWidth;
+
+        /// <summary>
+        /// The last known height of the window.
+        /// </summary>
         private int _lastHeight;
+
+        /// <summary>
+        /// Flag indicating whether the instance has been disposed.
+        /// </summary>
         private bool _disposed;
 
-        public bool IsOpen   => _window != IntPtr.Zero;
+        /// <summary>
+        /// Gets a value indicating whether the window is open.
+        /// </summary>
+        public bool IsOpen => _window != IntPtr.Zero;
+
+        /// <summary>
+        /// Gets a value indicating whether the window is active.
+        /// </summary>
         public bool IsActive => _window != IntPtr.Zero;
 
+        /// <summary>
+        /// Occurs when the window is resized.
+        /// </summary>
         public event Action<int, int>? OnResize;
+
+        /// <summary>
+        /// Occurs when the window is closed.
+        /// </summary>
         public event Action? OnClosed;
 
-        // -------------------------------------------------------------------------
-        // Invoke queue item
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Represents a queued action for the event thread.
+        /// </summary>
         private sealed class InvokeItem
         {
+            /// <summary>
+            /// Gets the action to execute.
+            /// </summary>
             public Action Action { get; }
+
+            /// <summary>
+            /// Gets the optional sync signal.
+            /// </summary>
             public ManualResetEventSlim? SyncSignal { get; }
+
+            /// <summary>
+            /// Gets or sets the exception that occurred during execution.
+            /// </summary>
             public Exception? Exception { get; set; }
 
+            /// <summary>
+            /// Initializes a new instance of the InvokeItem class.
+            /// </summary>
+            /// <param name="action">The action.</param>
+            /// <param name="syncSignal">The optional sync signal.</param>
             public InvokeItem(Action action, ManualResetEventSlim? syncSignal = null)
             {
                 Action = action;
@@ -56,114 +120,219 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
-        // -------------------------------------------------------------------------
-        // X11 event type constants
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// X11 ConfigureNotify event constant.
+        /// </summary>
         private const int ConfigureNotify = 22;
-        private const int ClientMessage   = 33;
 
         /// <summary>
-        /// Union-style XEvent struct. All X11 events start with 'int type' at offset 0.
-        /// Fields at other offsets are only valid for specific event types.
-        ///
-        /// Offsets verified against X11 headers on 64-bit Linux (long=8, ptr=8):
-        ///   ConfigureNotify.width   → offset 56  (int)
-        ///   ConfigureNotify.height  → offset 60  (int)
-        ///   ClientMessage.message_type → offset 40 (Atom = unsigned long → IntPtr)
-        ///   ClientMessage.data.l[0]    → offset 56 (long → IntPtr)
-        ///
-        /// XEvent is a union of 'long pad[24]' = 192 bytes on 64-bit.
+        /// X11 ClientMessage event constant.
+        /// </summary>
+        private const int ClientMessage = 33;
+
+        /// <summary>
+        /// Union-style XEvent struct for X11 events.
+        /// Offsets are mapped for 64-bit Linux.
         /// </summary>
         [StructLayout(LayoutKind.Explicit, Size = 192)]
         private struct XEvent
         {
-            [FieldOffset(0)]  public int    Type;
-            // ConfigureNotify (type = 22)
-            [FieldOffset(56)] public int    CfgWidth;
-            [FieldOffset(60)] public int    CfgHeight;
-            // ClientMessage (type = 33)
-            [FieldOffset(40)] public IntPtr CmMessageType;   // Atom (unsigned long)
-            [FieldOffset(56)] public IntPtr CmDataL0;        // data.l[0] (long)
+            /// <summary>
+            /// Event type.
+            /// </summary>
+            [FieldOffset(0)] public int Type;
+
+            /// <summary>
+            /// ConfigureNotify width.
+            /// </summary>
+            [FieldOffset(56)] public int CfgWidth;
+
+            /// <summary>
+            /// ConfigureNotify height.
+            /// </summary>
+            [FieldOffset(60)] public int CfgHeight;
+
+            /// <summary>
+            /// ClientMessage type atom.
+            /// </summary>
+            [FieldOffset(40)] public IntPtr CmMessageType;
+
+            /// <summary>
+            /// ClientMessage data.
+            /// </summary>
+            [FieldOffset(56)] public IntPtr CmDataL0;
         }
 
-        // -------------------------------------------------------------------------
-        // X11 P/Invoke declarations
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Opens an X11 display connection.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern IntPtr XOpenDisplay(IntPtr display);
 
+        /// <summary>
+        /// Closes the X11 display connection.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XCloseDisplay(IntPtr display);
 
+        /// <summary>
+        /// Gets the default root window.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern IntPtr XDefaultRootWindow(IntPtr display);
 
+        /// <summary>
+        /// Creates a simple window.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern IntPtr XCreateSimpleWindow(
             IntPtr display, IntPtr parent,
             int x, int y, uint width, uint height,
             uint border_width, ulong border, ulong background);
 
+        /// <summary>
+        /// Maps the window to the screen.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XMapWindow(IntPtr display, IntPtr window);
 
+        /// <summary>
+        /// Destroys the window.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XDestroyWindow(IntPtr display, IntPtr window);
 
+        /// <summary>
+        /// Stores the window name.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XStoreName(IntPtr display, IntPtr window, string window_name);
 
+        /// <summary>
+        /// Selects input events for the window.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XSelectInput(IntPtr display, IntPtr window, long event_mask);
 
+        /// <summary>
+        /// Flushes the X11 output buffer.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XFlush(IntPtr display);
 
+        /// <summary>
+        /// Gets the atom ID for the given name.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern IntPtr XInternAtom(IntPtr display, string atom_name, bool only_if_exists);
 
+        /// <summary>
+        /// Sets window manager protocols.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XSetWMProtocols(IntPtr display, IntPtr window, ref IntPtr protocols, int count);
 
+        /// <summary>
+        /// Changes a property of the window.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XChangeProperty(
             IntPtr display, IntPtr window,
             IntPtr property, IntPtr type,
             int format, int mode, IntPtr data, int nelements);
 
+        /// <summary>
+        /// Gets the next event from the queue.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XNextEvent(IntPtr display, out XEvent xevent);
 
+        /// <summary>
+        /// Gets the number of pending events.
+        /// </summary>
         [DllImport("libX11.so.6")]
         private static extern int XPending(IntPtr display);
 
+        /// <summary>
+        /// Mask for StructureNotify events.
+        /// </summary>
         private const long StructureNotifyMask = 1L << 17;
-        private const long ExposureMask        = 1L << 15;
 
+        /// <summary>
+        /// Mask for Exposure events.
+        /// </summary>
+        private const long ExposureMask = 1L << 15;
+
+        /// <summary>
+        /// Motif window manager hints struct.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         private struct MotifWmHints
         {
+            /// <summary>
+            /// Flags.
+            /// </summary>
             public uint flags;
+            /// <summary>
+            /// Functions.
+            /// </summary>
             public uint functions;
+            /// <summary>
+            /// Decorations.
+            /// </summary>
             public uint decorations;
-            public int  input_mode;
+            /// <summary>
+            /// Input mode.
+            /// </summary>
+            public int input_mode;
+            /// <summary>
+            /// Status.
+            /// </summary>
             public uint status;
         }
 
-        private const uint MWM_HINTS_FUNCTIONS   = 1u << 0;
+        /// <summary>
+        /// Motif functions hint flag.
+        /// </summary>
+        private const uint MWM_HINTS_FUNCTIONS = 1u << 0;
+
+        /// <summary>
+        /// Motif decorations hint flag.
+        /// </summary>
         private const uint MWM_HINTS_DECORATIONS = 1u << 1;
-        private const uint MWM_FUNC_RESIZE       = 1u << 1;
-        private const uint MWM_FUNC_CLOSE        = 1u << 5;
-        private const uint MWM_FUNC_MINIMIZE     = 1u << 3;
-        private const uint MWM_FUNC_MAXIMIZE     = 1u << 4;
-        private const uint MWM_DECOR_ALL         = 1u << 0;
 
-        // -------------------------------------------------------------------------
-        // Open / event thread
-        // -------------------------------------------------------------------------
+        /// <summary>
+        /// Motif resize function flag.
+        /// </summary>
+        private const uint MWM_FUNC_RESIZE = 1u << 1;
 
+        /// <summary>
+        /// Motif close function flag.
+        /// </summary>
+        private const uint MWM_FUNC_CLOSE = 1u << 5;
+
+        /// <summary>
+        /// Motif minimize function flag.
+        /// </summary>
+        private const uint MWM_FUNC_MINIMIZE = 1u << 3;
+
+        /// <summary>
+        /// Motif maximize function flag.
+        /// </summary>
+        private const uint MWM_FUNC_MAXIMIZE = 1u << 4;
+
+        /// <summary>
+        /// Motif all decorations flag.
+        /// </summary>
+        private const uint MWM_DECOR_ALL = 1u << 0;
+
+        /// <summary>
+        /// Opens a native window and starts the event loop thread.
+        /// Blocks until the window is successfully created.
+        /// </summary>
+        /// <param name="title">Window title.</param>
+        /// <param name="width">Window width.</param>
+        /// <param name="height">Window height.</param>
         public void Open(string title, int width, int height)
         {
             if (_window != IntPtr.Zero)
@@ -171,12 +340,12 @@ namespace OwnVST3Host.NativeWindow
 
             _shouldStop = false;
             _windowReady.Reset();
-            _lastWidth  = width;
+            _lastWidth = width;
             _lastHeight = height;
 
             _eventThread = new Thread(() => EventThreadProc(title, width, height))
             {
-                Name         = "VST X11 Event Thread",
+                Name = "VST X11 Event Thread",
                 IsBackground = true
             };
             _eventThread.Start();
@@ -187,6 +356,13 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException("Failed to create X11 window on event thread.");
         }
 
+        /// <summary>
+        /// Main procedure for the X11 event thread.
+        /// Initializes the display, window, and enters the event loop.
+        /// </summary>
+        /// <param name="title">Window title.</param>
+        /// <param name="width">Window width.</param>
+        /// <param name="height">Window height.</param>
         private void EventThreadProc(string title, int width, int height)
         {
             try
@@ -194,7 +370,7 @@ namespace OwnVST3Host.NativeWindow
                 _display = XOpenDisplay(IntPtr.Zero);
                 if (_display == IntPtr.Zero)
                 {
-                    Console.WriteLine("[VST X11] XOpenDisplay failed — DISPLAY not set?");
+                    Console.WriteLine("[VST X11] XOpenDisplay failed");
                     _windowReady.Set();
                     return;
                 }
@@ -217,8 +393,7 @@ namespace OwnVST3Host.NativeWindow
                 XStoreName(_display, _window, title);
                 SetMotifHints();
 
-                // Register WM_DELETE_WINDOW so the user can close the window.
-                _wmProtocols    = XInternAtom(_display, "WM_PROTOCOLS",    false);
+                _wmProtocols = XInternAtom(_display, "WM_PROTOCOLS", false);
                 _wmDeleteWindow = XInternAtom(_display, "WM_DELETE_WINDOW", false);
                 XSetWMProtocols(_display, _window, ref _wmDeleteWindow, 1);
 
@@ -237,18 +412,20 @@ namespace OwnVST3Host.NativeWindow
             }
             finally
             {
-                // X11 resources are always released on the event thread.
                 CleanupX11Resources();
             }
         }
 
+        /// <summary>
+        /// Sets window hints to enable standard manager functions.
+        /// </summary>
         private void SetMotifHints()
         {
             IntPtr atom = XInternAtom(_display, "_MOTIF_WM_HINTS", false);
             MotifWmHints hints = new()
             {
-                flags       = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS,
-                functions   = MWM_FUNC_RESIZE | MWM_FUNC_MINIMIZE | MWM_FUNC_MAXIMIZE | MWM_FUNC_CLOSE,
+                flags = MWM_HINTS_FUNCTIONS | MWM_HINTS_DECORATIONS,
+                functions = MWM_FUNC_RESIZE | MWM_FUNC_MINIMIZE | MWM_FUNC_MAXIMIZE | MWM_FUNC_CLOSE,
                 decorations = MWM_DECOR_ALL
             };
             IntPtr hintsPtr = Marshal.AllocHGlobal(Marshal.SizeOf(hints));
@@ -260,18 +437,16 @@ namespace OwnVST3Host.NativeWindow
             finally { Marshal.FreeHGlobal(hintsPtr); }
         }
 
-        // -------------------------------------------------------------------------
-        // Event loop
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Runs the X11 event loop until termination is requested.
+        /// Drains the invoke queue and processes X11 events.
+        /// </summary>
         private void RunEventLoop()
         {
             while (!_shouldStop)
             {
-                // Drain the invoke queue first.
                 DrainInvokeQueue();
 
-                // Process all pending X11 events without blocking.
                 while (XPending(_display) > 0)
                 {
                     XNextEvent(_display, out XEvent xev);
@@ -279,40 +454,43 @@ namespace OwnVST3Host.NativeWindow
                     if (_shouldStop) return;
                 }
 
-                // Brief sleep to avoid busy-waiting. 1 ms gives acceptable latency for
-                // Invoke() and resize/close detection while using negligible CPU.
                 Thread.Sleep(1);
             }
         }
 
+        /// <summary>
+        /// Processes all pending actions in the invoke queue.
+        /// </summary>
         private void DrainInvokeQueue()
         {
             while (_invokeQueue.TryDequeue(out var item))
             {
-                try   { item.Action(); }
+                try { item.Action(); }
                 catch (Exception ex) { item.Exception = ex; }
                 finally { item.SyncSignal?.Set(); }
             }
         }
 
+        /// <summary>
+        /// Handles a single X11 event.
+        /// Processes resize notifications and close requests.
+        /// </summary>
+        /// <param name="xev">The X11 event to handle.</param>
         private void HandleXEvent(ref XEvent xev)
         {
             switch (xev.Type)
             {
                 case ConfigureNotify:
-                    // ConfigureNotify fires for position changes too; only propagate
-                    // when the size actually changed to avoid redundant ResizeEditor calls.
                     if (xev.CfgWidth > 0 && xev.CfgHeight > 0
                         && (xev.CfgWidth != _lastWidth || xev.CfgHeight != _lastHeight))
                     {
-                        _lastWidth  = xev.CfgWidth;
+                        _lastWidth = xev.CfgWidth;
                         _lastHeight = xev.CfgHeight;
                         OnResize?.Invoke(_lastWidth, _lastHeight);
                     }
                     break;
 
                 case ClientMessage:
-                    // WM_DELETE_WINDOW: user clicked the close button.
                     if (xev.CmMessageType == _wmProtocols && xev.CmDataL0 == _wmDeleteWindow)
                     {
                         _shouldStop = true;
@@ -322,6 +500,9 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Releases all X11 resources.
+        /// </summary>
         private void CleanupX11Resources()
         {
             if (_window != IntPtr.Zero)
@@ -337,34 +518,32 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
-        // -------------------------------------------------------------------------
-        // Close
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Initiates the closing of the window.
+        /// Ensures the event loop thread shuts down safely.
+        /// </summary>
         public void Close()
         {
             _shouldStop = true;
 
-            // Do not Join from the event thread itself — it would deadlock.
             var thread = _eventThread;
             if (thread != null && Thread.CurrentThread != thread)
             {
                 thread.Join(2000);
                 _eventThread = null;
             }
-            // X11 resources are cleaned up by EventThreadProc's finally block.
         }
 
-        // -------------------------------------------------------------------------
-        // GetHandle / Invoke / BeginInvoke
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Gets the platform-specific window handle.
+        /// </summary>
+        /// <returns>The X11 window pointer.</returns>
         public IntPtr GetHandle() => _window;
 
         /// <summary>
-        /// Synchronously executes an action on the X11 event loop thread.
-        /// If called from the event thread itself, executes directly (no deadlock).
+        /// Synchronously executes an action on the X11 event thread.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         public void Invoke(Action action)
         {
             if (_window == IntPtr.Zero) return;
@@ -385,19 +564,18 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Asynchronously posts an action to the X11 event loop thread.
-        /// Returns immediately; the action runs within ~1 ms.
+        /// Asynchronously posts an action to the X11 event thread.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         public void BeginInvoke(Action action)
         {
             if (_window == IntPtr.Zero) return;
             _invokeQueue.Enqueue(new InvokeItem(action));
         }
 
-        // -------------------------------------------------------------------------
-        // IDisposable
-        // -------------------------------------------------------------------------
-
+        /// <summary>
+        /// Disposes of the native window resources.
+        /// </summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -409,6 +587,9 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Finalizes an instance of the NativeWindowLinux class.
+        /// </summary>
         ~NativeWindowLinux() => Dispose();
     }
 }

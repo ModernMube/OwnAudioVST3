@@ -5,21 +5,39 @@ using System.Threading;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// macOS native window management using Cocoa/Objective-C Runtime
+    /// macOS native window management using Cocoa and Objective-C Runtime.
+    /// Manages window creation, rendering, and thread synchronization.
     /// </summary>
     internal class NativeWindowMac : INativeWindow
     {
+        /// <summary>
+        /// Pointer to the NSWindow instance.
+        /// </summary>
         private IntPtr _nsWindow = IntPtr.Zero;
+
+        /// <summary>
+        /// Pointer to the NSView instance.
+        /// </summary>
         private IntPtr _nsView = IntPtr.Zero;
+
+        /// <summary>
+        /// Indicates whether the window resources have been disposed.
+        /// </summary>
         private bool _disposed = false;
 
-        // Main thread reference - on macOS all Cocoa/AppKit operations
-        // must run on the main thread, otherwise undefined behavior
-        // Note: dispatch_get_main_queue() is an inline function, so we load _dispatch_main_q directly
+        /// <summary>
+        /// Reference to the main GCD dispatch queue.
+        /// </summary>
         private static readonly IntPtr _mainQueue;
 
+        /// <summary>
+        /// Gets a value indicating whether the window is open.
+        /// </summary>
         public bool IsOpen => _nsWindow != IntPtr.Zero;
 
+        /// <summary>
+        /// Gets a value indicating whether the window is active and has keyboard focus.
+        /// </summary>
         public bool IsActive
         {
             get
@@ -27,52 +45,101 @@ namespace OwnVST3Host.NativeWindow
                 if (_nsWindow == IntPtr.Zero)
                     return false;
 
-                // Check if this window is the key window (has keyboard focus)
                 IntPtr result = objc_msgSend(_nsWindow, sel_registerName("isKeyWindow"));
                 return result != IntPtr.Zero;
             }
         }
 
+        /// <summary>
+        /// Occurs when the window is resized.
+        /// </summary>
         public event Action<int, int>? OnResize;
+
+        /// <summary>
+        /// Occurs when the window is closed.
+        /// </summary>
         public event Action? OnClosed;
 
         #region Objective-C Runtime Declarations
 
+        /// <summary>
+        /// Gets an Objective-C class by name.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern IntPtr objc_getClass(string name);
 
+        /// <summary>
+        /// Registers a method selector.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern IntPtr sel_registerName(string name);
 
+        /// <summary>
+        /// Sends a message to an Objective-C object.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern IntPtr objc_msgSend(IntPtr receiver, IntPtr selector);
 
+        /// <summary>
+        /// Sends a message to an Objective-C object with one argument.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern IntPtr objc_msgSend(IntPtr receiver, IntPtr selector, IntPtr arg1);
 
-        // Objective-C BOOL is 'signed char' (1 byte). UnmanagedType.I1 prevents the default
-        // 4-byte BOOL marshaling that would send garbage in the upper bytes on strict ABIs.
+        /// <summary>
+        /// Sends a message to an Objective-C object with a boolean argument.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
-        private static extern void objc_msgSend(IntPtr receiver, IntPtr selector,
-            [MarshalAs(UnmanagedType.I1)] bool arg1);
+        private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, [MarshalAs(UnmanagedType.I1)] bool arg1);
 
+        /// <summary>
+        /// Sends a message to an Objective-C object with a long argument.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib")]
         private static extern void objc_msgSend(IntPtr receiver, IntPtr selector, long arg1);
 
+        /// <summary>
+        /// Initializes a window with a content rectangle.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
         private static extern IntPtr objc_msgSend_initWithContentRect(IntPtr receiver, IntPtr selector, NSRect rect, IntPtr styleMask, IntPtr backing, IntPtr defer);
 
+        /// <summary>
+        /// Initializes a view with a frame rectangle.
+        /// </summary>
         [DllImport("/usr/lib/libobjc.dylib", EntryPoint = "objc_msgSend")]
         private static extern IntPtr objc_msgSend_initWithFrame(IntPtr receiver, IntPtr selector, NSRect rect);
 
+        /// <summary>
+        /// Represents a rectangle in the macOS coordinate system.
+        /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         private struct NSRect
         {
+            /// <summary>
+            /// The x-coordinate.
+            /// </summary>
             public double X;
+            /// <summary>
+            /// The y-coordinate.
+            /// </summary>
             public double Y;
+            /// <summary>
+            /// The width.
+            /// </summary>
             public double Width;
+            /// <summary>
+            /// The height.
+            /// </summary>
             public double Height;
 
+            /// <summary>
+            /// Initializes a new instance of the NSRect struct.
+            /// </summary>
+            /// <param name="x">The x-coordinate.</param>
+            /// <param name="y">The y-coordinate.</param>
+            /// <param name="width">The width.</param>
+            /// <param name="height">The height.</param>
             public NSRect(double x, double y, double width, double height)
             {
                 X = x;
@@ -86,55 +153,68 @@ namespace OwnVST3Host.NativeWindow
 
         #region GCD (Grand Central Dispatch) and CFRunLoop for main thread marshaling
 
-        // Note: dispatch_get_main_queue() is inline, not a real function
-        // We use dlsym to load _dispatch_main_q symbol directly
-
+        /// <summary>
+        /// Submits a block for asynchronous execution on a dispatch queue.
+        /// </summary>
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern void dispatch_async_f(IntPtr queue, IntPtr context, dispatch_function_t work);
 
+        /// <summary>
+        /// Submits a block for synchronous execution on a dispatch queue.
+        /// </summary>
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern void dispatch_sync_f(IntPtr queue, IntPtr context, dispatch_function_t work);
 
+        /// <summary>
+        /// Identifies the main thread.
+        /// </summary>
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern int pthread_main_np();
 
+        /// <summary>
+        /// Delegate for dispatch functions.
+        /// </summary>
         private delegate void dispatch_function_t(IntPtr context);
 
-        // dlopen/dlsym for loading the GCD main queue symbol
+        /// <summary>
+        /// Loads a dynamic library.
+        /// </summary>
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern IntPtr dlopen(string path, int mode);
 
+        /// <summary>
+        /// Obtains the address of a symbol in a dynamic library.
+        /// </summary>
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern IntPtr dlsym(IntPtr handle, string symbol);
 
-        private const int RTLD_DEFAULT = -2; // Special handle for default search
+        /// <summary>
+        /// Constant for default symbol resolution search.
+        /// </summary>
+        private const int RTLD_DEFAULT = -2;
 
+        /// <summary>
+        /// Initializes static members of the NativeWindowMac class.
+        /// </summary>
         static NativeWindowMac()
         {
-            // Load _dispatch_main_q symbol. dispatch_get_main_queue() is an inline function
-            // that is not exported, so we load the underlying symbol directly via RTLD_DEFAULT.
             IntPtr mainQueueSymbol = dlsym(new IntPtr(RTLD_DEFAULT), "_dispatch_main_q");
             if (mainQueueSymbol == IntPtr.Zero)
                 throw new InvalidOperationException("Failed to load _dispatch_main_q symbol.");
             _mainQueue = mainQueueSymbol;
         }
 
+        /// <summary>
+        /// Determines whether the current thread is the macOS main thread.
+        /// </summary>
+        /// <returns>True if the current thread is the main thread; otherwise, false.</returns>
         private static bool IsMainThread() => pthread_main_np() != 0;
 
         /// <summary>
-        /// Asynchronously executes an operation on the macOS main thread via GCD.
-        ///
-        /// Uses dispatch_async_f instead of CFRunLoopTimer to avoid a deadlock:
-        /// CFRunLoopTimer with kCFRunLoopCommonModes fires during NSEventTrackingRunLoopMode
-        /// (NSMenu popup tracking). A .NET P/Invoke callback executing inside that tracking
-        /// event loop can deadlock with AppKit on Apple Silicon macOS 12+, causing the
-        /// plugin editor UI to freeze permanently when a dropdown is clicked.
-        ///
-        /// GCD dispatch_async_f uses the main queue's own dispatch source, which is separate
-        /// from the RunLoop timer infrastructure and does not exhibit this interaction.
-        /// The _idlePending throttle in VstEditorController ensures at most one pending
-        /// callback at a time, so no accumulation occurs during tracking mode.
+        /// Asynchronously executes an action on the macOS main thread.
+        /// Avoids deadlocks during UI tracking modes.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         private static void DispatchToMainAsync(Action action)
         {
             if (IsMainThread())
@@ -148,9 +228,10 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Synchronously executes an operation on the macOS main thread (dispatch_sync).
-        /// WARNING: If called from the main thread, executes directly (avoids deadlock).
+        /// Synchronously executes an action on the macOS main thread.
+        /// If already on the main thread, executes directly.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         private static void DispatchToMainSync(Action action)
         {
             if (IsMainThread())
@@ -164,9 +245,9 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// GCD callback - runs on the main thread (dispatch_sync and dispatch_async).
-        /// Unwraps the Action from the GCHandle and executes it.
+        /// Callback executed by Grand Central Dispatch.
         /// </summary>
+        /// <param name="context">The context containing the action handle.</param>
         private static void DispatchCallback(IntPtr context)
         {
             var handle = GCHandle.FromIntPtr(context);
@@ -183,6 +264,12 @@ namespace OwnVST3Host.NativeWindow
 
         #endregion
 
+        /// <summary>
+        /// Opens a native macOS window.
+        /// </summary>
+        /// <param name="title">The window title.</param>
+        /// <param name="width">The window width.</param>
+        /// <param name="height">The window height.</param>
         public void Open(string title, int width, int height)
         {
             if (_nsWindow != IntPtr.Zero)
@@ -190,35 +277,29 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException("Window is already open!");
             }
 
-            // CRITICAL FIX: On macOS, ALL AppKit/Cocoa operations (including NSWindow creation)
-            // MUST run on the main thread (pthread_main_np() == 1).
-            // If called from Avalonia UI thread (which may NOT be the macOS main thread),
-            // we marshal to the main thread using dispatch_sync.
-            // This fixes crash when opening VST editor during playback.
             if (!IsMainThread())
             {
-                // Marshal to main thread synchronously
                 DispatchToMainSync(() => OpenOnMainThread(title, width, height));
                 return;
             }
 
-            // Already on main thread, proceed directly
             OpenOnMainThread(title, width, height);
         }
 
         /// <summary>
-        /// Internal Open implementation - MUST be called on macOS main thread only.
+        /// Internal implementation to open the window on the main thread.
         /// </summary>
+        /// <param name="title">The window title.</param>
+        /// <param name="width">The window width.</param>
+        /// <param name="height">The window height.</param>
         private void OpenOnMainThread(string title, int width, int height)
         {
-            // Get NSWindow class
             IntPtr nsWindowClass = objc_getClass("NSWindow");
             if (nsWindowClass == IntPtr.Zero)
             {
                 throw new InvalidOperationException("Failed to load NSWindow class!");
             }
 
-            // Create NSString for the title
             IntPtr titleString = IntPtr.Zero;
             IntPtr utf8Ptr = IntPtr.Zero;
             try
@@ -234,52 +315,30 @@ namespace OwnVST3Host.NativeWindow
                     Marshal.FreeHGlobal(utf8Ptr);
             }
 
-            // Create NSWindow
-            // macOS coordinate system: bottom-left corner is (0,0), so we use 0,0
             NSRect contentRect = new NSRect(0, 0, width, height);
-
-            // NSWindowStyleMask: Titled | Closable | Miniaturizable | Resizable
-            // Titled = 1, Closable = 2, Miniaturizable = 4, Resizable = 8
             IntPtr styleMask = new IntPtr(1 | 2 | 4 | 8);
 
             _nsWindow = objc_msgSend(nsWindowClass, sel_registerName("alloc"));
             _nsWindow = objc_msgSend_initWithContentRect(_nsWindow, sel_registerName("initWithContentRect:styleMask:backing:defer:"),
-                contentRect, styleMask, new IntPtr(2), IntPtr.Zero); // NSBackingStoreBuffered = 2
+                contentRect, styleMask, new IntPtr(2), IntPtr.Zero);
 
             if (_nsWindow == IntPtr.Zero)
             {
                 throw new InvalidOperationException("Failed to create NSWindow!");
             }
 
-            // Set title
             objc_msgSend(_nsWindow, sel_registerName("setTitle:"), titleString);
 
-            // Release the title string (setTitle: retains it)
             if (titleString != IntPtr.Zero)
                 objc_msgSend(titleString, sel_registerName("release"));
 
-            // CRITICAL: Set window to not quit the application when closed
             objc_msgSend(_nsWindow, sel_registerName("setReleasedWhenClosed:"), false);
-
-            // CRITICAL: Set window to not disappear when it loses focus
-            // This is essential for proper VST plugin dropdown menu behavior
             objc_msgSend(_nsWindow, sel_registerName("setHidesOnDeactivate:"), false);
-
-            // Enable mouse events - required for proper dropdown menu tracking
             objc_msgSend(_nsWindow, sel_registerName("setAcceptsMouseMovedEvents:"), true);
-
-            // CRITICAL: Do not ignore mouse events - allow child windows/menus to receive them
             objc_msgSend(_nsWindow, sel_registerName("setIgnoresMouseEvents:"), false);
-
-            // Set window level to normal (NSNormalWindowLevel = 0)
-            // This ensures popup menus can appear above the window
             objc_msgSend(_nsWindow, sel_registerName("setLevel:"), 0L);
-
-            // Center window (must be called BEFORE showing)
             objc_msgSend(_nsWindow, sel_registerName("center"));
 
-            // Create NSView (this is what we return to the VST plugin)
-            // View size starts at 0,0 because it's relative to contentRect
             NSRect viewRect = new NSRect(0, 0, width, height);
             IntPtr nsViewClass = objc_getClass("NSView");
             _nsView = objc_msgSend(nsViewClass, sel_registerName("alloc"));
@@ -290,17 +349,15 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException("Failed to create NSView!");
             }
 
-            // CRITICAL: Set NSView as the window's content view (not as a subview!)
-            // This ensures proper window hierarchy for plugin popup windows/menus
             objc_msgSend(_nsWindow, sel_registerName("setContentView:"), _nsView);
-
-            // Show window
             objc_msgSend(_nsWindow, sel_registerName("makeKeyAndOrderFront:"), IntPtr.Zero);
         }
 
+        /// <summary>
+        /// Closes the native macOS window.
+        /// </summary>
         public void Close()
         {
-            // CRITICAL FIX: Cocoa operations must run on main thread
             if (!IsMainThread())
             {
                 DispatchToMainSync(CloseOnMainThread);
@@ -311,15 +368,13 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Internal Close implementation - MUST be called on macOS main thread only.
+        /// Internal implementation to close the window on the main thread.
         /// </summary>
         private void CloseOnMainThread()
         {
             if (_nsWindow != IntPtr.Zero)
             {
                 objc_msgSend(_nsWindow, sel_registerName("close"));
-
-                // Release
                 objc_msgSend(_nsWindow, sel_registerName("release"));
                 _nsWindow = IntPtr.Zero;
             }
@@ -333,27 +388,30 @@ namespace OwnVST3Host.NativeWindow
             OnClosed?.Invoke();
         }
 
+        /// <summary>
+        /// Gets the handle to the macOS native view.
+        /// </summary>
+        /// <returns>The pointer to the NSView.</returns>
         public IntPtr GetHandle()
         {
-            // VST3 plugins on macOS expect an NSView
             return _nsView;
         }
 
         /// <summary>
-        /// Synchronous execution on the main thread.
-        /// On macOS, all AppKit/Cocoa operations must run on the main thread.
+        /// Synchronously executes an action on the macOS main thread.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         public void Invoke(Action action) => DispatchToMainSync(action);
 
         /// <summary>
-        /// Asynchronous execution on the main thread.
-        /// On macOS, all AppKit/Cocoa operations must run on the main thread.
-        /// Uses CFRunLoopTimer with kCFRunLoopCommonModes, which ensures
-        /// that the callback runs even when a dropdown menu is in tracking mode.
-        /// This solves VST plugin editor freezing on macOS under heavy background load.
+        /// Asynchronously executes an action on the macOS main thread.
         /// </summary>
+        /// <param name="action">The action to execute.</param>
         public void BeginInvoke(Action action) => DispatchToMainAsync(action);
 
+        /// <summary>
+        /// Disposes of the native window resources.
+        /// </summary>
         public void Dispose()
         {
             if (!_disposed)
@@ -364,6 +422,9 @@ namespace OwnVST3Host.NativeWindow
             }
         }
 
+        /// <summary>
+        /// Finalizes an instance of the NativeWindowMac class.
+        /// </summary>
         ~NativeWindowMac()
         {
             Dispose();

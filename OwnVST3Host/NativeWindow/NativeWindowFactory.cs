@@ -4,15 +4,15 @@ using System.Runtime.InteropServices;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// Factory osztály a platform-specifikus natív ablak példányosításához
+    /// Factory class for instantiating platform-specific native windows.
     /// </summary>
     public static class NativeWindowFactory
     {
         /// <summary>
-        /// Létrehoz egy natív ablakot az aktuális operációs rendszernek megfelelően
+        /// Creates a native window appropriate for the current operating system.
         /// </summary>
-        /// <returns>Platform-specifikus INativeWindow implementáció</returns>
-        /// <exception cref="PlatformNotSupportedException">Ha az operációs rendszer nem támogatott</exception>
+        /// <returns>Platform-specific INativeWindow implementation</returns>
+        /// <exception cref="PlatformNotSupportedException">If the OS is not supported</exception>
         public static INativeWindow Create()
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
@@ -31,7 +31,7 @@ namespace OwnVST3Host.NativeWindow
             }
 
             throw new PlatformNotSupportedException(
-                $"A natív ablakkezelés nem támogatott ezen az operációs rendszeren: {RuntimeInformation.OSDescription}");
+                $"Native window management is not supported on this OS: {RuntimeInformation.OSDescription}");
         }
     }
 }

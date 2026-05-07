@@ -9,19 +9,29 @@ namespace OwnVST3Host
     /// </summary>
     public enum VstPluginState
     {
-        /// <summary>No plugin loaded. Initial state and state after Dispose.</summary>
+        /// <summary>
+        /// No plugin loaded. Initial state and state after Dispose.
+        /// </summary>
         NotLoaded = 0,
 
-        /// <summary>LoadPlugin succeeded. Plugin factory created but audio engine not yet started.</summary>
+        /// <summary>
+        /// LoadPlugin succeeded. Plugin factory created but audio engine not yet started.
+        /// </summary>
         Loaded,
 
-        /// <summary>Initialize succeeded. Plugin is ready to process audio.</summary>
+        /// <summary>
+        /// Initialize succeeded. Plugin is ready to process audio.
+        /// </summary>
         Ready,
 
-        /// <summary>ProcessAudio is currently executing on the audio thread.</summary>
+        /// <summary>
+        /// ProcessAudio is currently executing on the audio thread.
+        /// </summary>
         Processing,
 
-        /// <summary>LoadPlugin or Initialize returned false. The wrapper instance must be replaced.</summary>
+        /// <summary>
+        /// LoadPlugin or Initialize returned false. The wrapper instance must be replaced.
+        /// </summary>
         Error
     }
 
