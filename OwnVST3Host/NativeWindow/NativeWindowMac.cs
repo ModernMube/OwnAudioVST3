@@ -100,60 +100,13 @@ namespace OwnVST3Host.NativeWindow
 
         private delegate void dispatch_function_t(IntPtr context);
 
-        // CFRunLoop API - supports explicit RunLoop modes
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern IntPtr CFRunLoopGetMain();
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct CFRunLoopTimerContext
-        {
-            public IntPtr version;
-            public IntPtr info;
-            public IntPtr retain;
-            public IntPtr release;
-            public IntPtr copyDescription;
-        }
-
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern IntPtr CFRunLoopTimerCreate(
-            IntPtr allocator,
-            double fireDate,
-            double interval,
-            ulong flags,
-            long order,
-            CFRunLoopTimerCallBack callout,
-            ref CFRunLoopTimerContext context);
-
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern void CFRunLoopAddTimer(IntPtr rl, IntPtr timer, IntPtr mode);
-
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern double CFAbsoluteTimeGetCurrent();
-
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern void CFRelease(IntPtr cf);
-
-        [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")]
-        private static extern void CFRunLoopWakeUp(IntPtr rl);
-
-        private delegate void CFRunLoopTimerCallBack(IntPtr timer, IntPtr info);
-
-        // Static delegate reference to prevent GC collection
-        private static readonly CFRunLoopTimerCallBack TimerCallbackDelegate = TimerCallback;
-
-        // kCFRunLoopCommonModes constant (CFStringRef)
-        // This mode set contains both NSDefaultRunLoopMode AND NSEventTrackingRunLoopMode
-        // So our callback runs even when a dropdown menu is open (tracking mode)
-        private static readonly IntPtr kCFRunLoopCommonModes;
-
-        // dlopen/dlsym for loading framework constants and dispatch queue
+        // dlopen/dlsym for loading the GCD main queue symbol
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern IntPtr dlopen(string path, int mode);
 
         [DllImport("/usr/lib/libSystem.B.dylib")]
         private static extern IntPtr dlsym(IntPtr handle, string symbol);
 
-        private const int RTLD_LAZY = 1;
         private const int RTLD_DEFAULT = -2; // Special handle for default search
 
         static NativeWindowMac()
@@ -164,28 +117,23 @@ namespace OwnVST3Host.NativeWindow
             if (mainQueueSymbol == IntPtr.Zero)
                 throw new InvalidOperationException("Failed to load _dispatch_main_q symbol.");
             _mainQueue = mainQueueSymbol;
-
-            // Load kCFRunLoopCommonModes from CoreFoundation. It is a CFStringRef* exported
-            // as a data symbol, so we dereference the pointer to get the CFStringRef value.
-            IntPtr cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_LAZY);
-            if (cfHandle != IntPtr.Zero)
-            {
-                IntPtr symbolPtr = dlsym(cfHandle, "kCFRunLoopCommonModes");
-                if (symbolPtr != IntPtr.Zero)
-                    kCFRunLoopCommonModes = Marshal.ReadIntPtr(symbolPtr);
-            }
-
-            if (kCFRunLoopCommonModes == IntPtr.Zero)
-                throw new InvalidOperationException("Failed to load kCFRunLoopCommonModes from CoreFoundation.");
         }
 
         private static bool IsMainThread() => pthread_main_np() != 0;
 
         /// <summary>
-        /// Asynchronously executes an operation on the macOS main thread.
-        /// Uses CFRunLoopTimer with kCFRunLoopCommonModes, which ensures
-        /// that the callback runs even when a dropdown menu is in tracking mode.
-        /// This solves VST plugin editor freezing on macOS.
+        /// Asynchronously executes an operation on the macOS main thread via GCD.
+        ///
+        /// Uses dispatch_async_f instead of CFRunLoopTimer to avoid a deadlock:
+        /// CFRunLoopTimer with kCFRunLoopCommonModes fires during NSEventTrackingRunLoopMode
+        /// (NSMenu popup tracking). A .NET P/Invoke callback executing inside that tracking
+        /// event loop can deadlock with AppKit on Apple Silicon macOS 12+, causing the
+        /// plugin editor UI to freeze permanently when a dropdown is clicked.
+        ///
+        /// GCD dispatch_async_f uses the main queue's own dispatch source, which is separate
+        /// from the RunLoop timer infrastructure and does not exhibit this interaction.
+        /// The _idlePending throttle in VstEditorController ensures at most one pending
+        /// callback at a time, so no accumulation occurs during tracking mode.
         /// </summary>
         private static void DispatchToMainAsync(Action action)
         {
@@ -195,50 +143,8 @@ namespace OwnVST3Host.NativeWindow
                 return;
             }
 
-            // Create GCHandle - ensures the Action is not garbage collected
             var handle = GCHandle.Alloc(action);
-
-            // Create CFRunLoopTimerContext with the GCHandle as info
-            var context = new CFRunLoopTimerContext
-            {
-                version = IntPtr.Zero,          // version 0
-                info = GCHandle.ToIntPtr(handle), // our GCHandle
-                retain = IntPtr.Zero,           // no retain callback
-                release = IntPtr.Zero,          // no release callback
-                copyDescription = IntPtr.Zero   // no description callback
-            };
-
-            // Create one-shot timer that fires immediately on the main RunLoop
-            // fireDate: current time (immediately)
-            // interval: 0 (one-shot, does not repeat)
-            double fireDate = CFAbsoluteTimeGetCurrent();
-            IntPtr timer = CFRunLoopTimerCreate(
-                IntPtr.Zero,                    // allocator (default)
-                fireDate,                       // fireDate (now, immediately)
-                0,                              // interval (0 = one-shot)
-                0,                              // flags
-                0,                              // order
-                TimerCallbackDelegate,          // callback (use static delegate to prevent GC)
-                ref context);                   // context struct
-
-            if (timer == IntPtr.Zero)
-            {
-                handle.Free();
-                throw new InvalidOperationException("Failed to create CFRunLoopTimer");
-            }
-
-            // Add timer to main RunLoop with kCFRunLoopCommonModes
-            // This guarantees that the timer fires even when:
-            // - NSDefaultRunLoopMode is active (normal operation)
-            // - NSEventTrackingRunLoopMode is active (dropdown menu, scrolling, etc.)
-            IntPtr mainRunLoop = CFRunLoopGetMain();
-            CFRunLoopAddTimer(mainRunLoop, timer, kCFRunLoopCommonModes);
-
-            // Wake up RunLoop if it's waiting
-            CFRunLoopWakeUp(mainRunLoop);
-
-            // Release timer - the RunLoop owns it until it fires
-            CFRelease(timer);
+            dispatch_async_f(_mainQueue, GCHandle.ToIntPtr(handle), DispatchCallback);
         }
 
         /// <summary>
@@ -258,26 +164,7 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// CFRunLoopTimer callback - runs on the main thread (RunLoop context).
-        /// Unwraps the Action from the GCHandle and executes it.
-        /// The 'timer' parameter is the CFRunLoopTimer reference, 'info' is the context (GCHandle pointer).
-        /// </summary>
-        private static void TimerCallback(IntPtr timer, IntPtr info)
-        {
-            var handle = GCHandle.FromIntPtr(info);
-            try
-            {
-                var action = (Action)handle.Target!;
-                action();
-            }
-            finally
-            {
-                handle.Free();
-            }
-        }
-
-        /// <summary>
-        /// GCD callback (used for dispatch_sync) - runs on the main thread.
+        /// GCD callback - runs on the main thread (dispatch_sync and dispatch_async).
         /// Unwraps the Action from the GCHandle and executes it.
         /// </summary>
         private static void DispatchCallback(IntPtr context)
