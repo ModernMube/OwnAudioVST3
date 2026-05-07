@@ -130,9 +130,16 @@ namespace OwnVST3Host.NativeWindow
                     var win = _nativeWindow;
                     _nativeWindow = null;
 
-                    try { _vst3Wrapper.CloseEditor(); }
-                    catch (Exception ex)
-                    { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
+                    Action doClose = () =>
+                    {
+                        try { _vst3Wrapper.CloseEditor(); }
+                        catch (Exception ex)
+                        { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
+                    };
+                    if (OperatingSystem.IsMacOS())
+                        win.Invoke(doClose);
+                    else
+                        doClose();
 
                     win.OnClosed -= OnWindowClosed;
                     win.OnResize -= OnWindowResized;
@@ -164,7 +171,18 @@ namespace OwnVST3Host.NativeWindow
 
                 IntPtr windowHandle = _nativeWindow.GetHandle();
 
-                bool success = _vst3Wrapper.CreateEditor(windowHandle);
+                bool success;
+                if (OperatingSystem.IsMacOS())
+                {
+                    bool s = false;
+                    _nativeWindow.Invoke(() => s = _vst3Wrapper.CreateEditor(windowHandle));
+                    success = s;
+                }
+                else
+                {
+                    success = _vst3Wrapper.CreateEditor(windowHandle);
+                }
+
                 if (!success)
                 {
                     CloseEditor();
