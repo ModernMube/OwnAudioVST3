@@ -329,10 +329,20 @@ namespace OwnVST3Host
 
         #region macOS GCD drain-signal helpers
 
-        [DllImport("libSystem.B.dylib")]
-        private static extern IntPtr dispatch_get_main_queue();
+        private static readonly IntPtr s_macOsMainQueue = GetMacOsMainQueue();
 
-        [DllImport("libSystem.B.dylib")]
+        private static IntPtr GetMacOsMainQueue()
+        {
+            if (!OperatingSystem.IsMacOS()) return IntPtr.Zero;
+            try
+            {
+                var lib = NativeLibrary.Load("libdispatch.dylib");
+                return NativeLibrary.GetExport(lib, "_dispatch_main_q");
+            }
+            catch { return IntPtr.Zero; }
+        }
+
+        [DllImport("libdispatch.dylib")]
         private static extern void dispatch_async_f(IntPtr queue, IntPtr context, IntPtr work);
 
         // Returns 1 when called from the main thread.
@@ -385,11 +395,11 @@ namespace OwnVST3Host
 
                 if (_pluginHandle != IntPtr.Zero)
                 {
-                    if (OperatingSystem.IsMacOS() && pthread_main_np() == 0)
+                    if (OperatingSystem.IsMacOS() && pthread_main_np() == 0 && s_macOsMainQueue != IntPtr.Zero)
                     {
                         var ctx = new DrainContext();
                         var gcHandle = GCHandle.Alloc(ctx);
-                        dispatch_async_f(dispatch_get_main_queue(),
+                        dispatch_async_f(s_macOsMainQueue,
                                          GCHandle.ToIntPtr(gcHandle),
                                          s_drainSignalPtr);
                         ctx.Done.Wait(5000);
