@@ -413,6 +413,41 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Returns the complete processor state as a byte array, or null on failure.
+        /// </summary>
+        public byte[]? GetState()
+        {
+            CheckDisposed();
+            if (_getStateFunc == null || _freeStateDataFunc == null) return null;
+            if (!_getStateFunc(_pluginHandle, out IntPtr ptr, out int len) || ptr == IntPtr.Zero || len <= 0)
+                return null;
+            try
+            {
+                byte[] result = new byte[len];
+                System.Runtime.InteropServices.Marshal.Copy(ptr, result, 0, len);
+                return result;
+            }
+            finally
+            {
+                _freeStateDataFunc(ptr);
+            }
+        }
+
+        /// <summary>
+        /// Restores the processor state from a byte array and syncs the controller.
+        /// </summary>
+        public bool SetState(byte[] data)
+        {
+            CheckDisposed();
+            if (_setStateFunc == null || data == null || data.Length == 0) return false;
+            unsafe
+            {
+                fixed (byte* p = data)
+                    return _setStateFunc(_pluginHandle, (IntPtr)p, data.Length);
+            }
+        }
+
+        /// <summary>
         /// Clears the string cache
         /// </summary>
         public void ClearStringCache()

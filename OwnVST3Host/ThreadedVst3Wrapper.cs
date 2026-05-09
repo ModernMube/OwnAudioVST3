@@ -165,6 +165,12 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     public Task<bool> SetParameterAsync(int paramId, double value) =>
         PostCommand(() => _inner.SetParameter(paramId, value));
 
+    public Task<byte[]?> GetStateAsync() =>
+        PostCommand(() => _inner.GetState());
+
+    public Task<bool> SetStateAsync(byte[] data) =>
+        PostCommand(() => _inner.SetState(data));
+
     /// <summary>
     /// Sets the playback tempo from the UI thread.
     /// </summary>
