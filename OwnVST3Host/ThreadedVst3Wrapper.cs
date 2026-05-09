@@ -155,6 +155,17 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     }
 
     /// <summary>
+    /// Sets a parameter value synchronously on the dedicated plugin thread.
+    /// Unlike SetParameter (which enqueues to the audio-thread SPSC queue), this call
+    /// executes on the same thread used for plugin initialization and GetAllParametersAsync,
+    /// ensuring that the native controller state is updated immediately and is visible
+    /// to subsequent GetParameterAt reads without requiring a processAudio cycle.
+    /// Use this for non-realtime operations such as project state restoration.
+    /// </summary>
+    public Task<bool> SetParameterAsync(int paramId, double value) =>
+        PostCommand(() => _inner.SetParameter(paramId, value));
+
+    /// <summary>
     /// Sets the playback tempo from the UI thread.
     /// </summary>
     public void SetTempo(double bpm)
