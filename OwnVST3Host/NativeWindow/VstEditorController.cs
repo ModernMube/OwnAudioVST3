@@ -171,17 +171,8 @@ namespace OwnVST3Host.NativeWindow
 
                 IntPtr windowHandle = _nativeWindow.GetHandle();
 
-                bool success;
-                if (OperatingSystem.IsMacOS())
-                {
-                    bool s = false;
-                    _nativeWindow.Invoke(() => s = _vst3Wrapper.CreateEditor(windowHandle));
-                    success = s;
-                }
-                else
-                {
-                    success = _vst3Wrapper.CreateEditor(windowHandle);
-                }
+                bool success = false;
+                _nativeWindow.Invoke(() => success = _vst3Wrapper.CreateEditor(windowHandle));
 
                 if (!success)
                 {
