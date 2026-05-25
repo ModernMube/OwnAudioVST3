@@ -114,7 +114,7 @@ namespace OwnVST3Host.NativeWindow
             var editorSize = size ?? new EditorSize(800, 600);
 
             if (OperatingSystem.IsWindows())
-                await OpenEditorCoreWindowsAsync(windowTitle, editorSize);
+                OpenEditorCoreWindows(windowTitle, editorSize);
             else
                 OpenEditorCore(windowTitle, editorSize);
         }
@@ -172,7 +172,7 @@ namespace OwnVST3Host.NativeWindow
         /// plugin attaches its child HWND — without this, some plugins (e.g. TDR Nova)
         /// only see a white window because the compositor hasn't finished initializing.
         /// </summary>
-        private async Task OpenEditorCoreWindowsAsync(string windowTitle, EditorSize editorSize)
+        private void OpenEditorCoreWindows(string windowTitle, EditorSize editorSize)
         {
             try
             {
@@ -180,9 +180,10 @@ namespace OwnVST3Host.NativeWindow
                 _nativeWindow.OnClosed += OnWindowClosed;
                 _nativeWindow.OnResize += OnWindowResized;
 
+                // Create the HWND hidden — the plugin attaches its child windows to a
+                // hidden parent, then Show() makes everything visible at once.
+                // This matches the Steinberg editorhost reference: show AFTER attached().
                 _nativeWindow.Open(windowTitle, editorSize.Width, editorSize.Height);
-
-                await Task.Delay(50).ConfigureAwait(true);
 
                 IntPtr windowHandle = _nativeWindow.GetHandle();
 
@@ -193,6 +194,9 @@ namespace OwnVST3Host.NativeWindow
                     CloseEditor();
                     throw new InvalidOperationException("Failed to create VST editor.");
                 }
+
+                // Show parent + plugin child windows together (no white flash).
+                _nativeWindow.Show();
 
                 StartIdleThread();
             }
@@ -329,18 +333,22 @@ namespace OwnVST3Host.NativeWindow
             try
             {
                 StopIdleThread();
+
+                // Unsubscribe events and clear _nativeWindow BEFORE calling CloseEditor.
+                // view->removed() can trigger WM_SIZE or WM_CLOSE callbacks on some plugins;
+                // clearing here prevents those from re-entering our handlers and double-closing.
+                if (_nativeWindow != null)
+                {
+                    _nativeWindow.OnClosed -= OnWindowClosed;
+                    _nativeWindow.OnResize -= OnWindowResized;
+                    _nativeWindow = null;
+                }
+
                 _vst3Wrapper.CloseEditor();
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[VST Editor] OnWindowClosed error: {ex.Message}");
-            }
-
-            if (_nativeWindow != null)
-            {
-                _nativeWindow.OnClosed -= OnWindowClosed;
-                _nativeWindow.OnResize -= OnWindowResized;
-                _nativeWindow = null;
             }
         }
 

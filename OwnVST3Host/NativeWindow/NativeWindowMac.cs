@@ -354,6 +354,11 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
+        /// No-op on macOS: the window is already visible after Open().
+        /// </summary>
+        public void Show() { }
+
+        /// <summary>
         /// Closes the native macOS window.
         /// </summary>
         public void Close()

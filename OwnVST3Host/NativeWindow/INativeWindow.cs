@@ -17,6 +17,13 @@ namespace OwnVST3Host.NativeWindow
         void Open(string title, int width, int height);
 
         /// <summary>
+        /// Makes the window visible after the plugin editor has been attached.
+        /// On Windows the window is created hidden and shown here (Steinberg spec order).
+        /// On macOS and Linux the window is already visible after Open(); this is a no-op.
+        /// </summary>
+        void Show();
+
+        /// <summary>
         /// Closes the window.
         /// </summary>
         void Close();

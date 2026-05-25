@@ -519,6 +519,11 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
+        /// No-op on Linux: the window is already visible after Open().
+        /// </summary>
+        public void Show() { }
+
+        /// <summary>
         /// Initiates the closing of the window.
         /// Ensures the event loop thread shuts down safely.
         /// </summary>

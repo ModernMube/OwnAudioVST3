@@ -79,6 +79,11 @@ namespace OwnVST3Host.NativeWindow
 
         private const int CW_USEDEFAULT = unchecked((int)0x80000000);
 
+        private const uint SWP_NOSIZE      = 0x0001;
+        private const uint SWP_NOMOVE      = 0x0002;
+        private const uint SWP_NOCOPYBITS  = 0x0100;
+        private const uint SWP_SHOWWINDOW  = 0x0040;
+
         private const uint WM_ERASEBKGND = 0x0014;
         private const uint WM_SIZE       = 0x0005;
         private const uint WM_CLOSE      = 0x0010;
@@ -124,10 +129,8 @@ namespace OwnVST3Host.NativeWindow
         private static extern bool DestroyWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
-        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-        [DllImport("user32.dll")]
-        private static extern bool UpdateWindow(IntPtr hWnd);
+        private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+            int x, int y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll")]
         private static extern IntPtr DefWindowProc(IntPtr hWnd, uint uMsg, IntPtr wParam, IntPtr lParam);
@@ -184,7 +187,7 @@ namespace OwnVST3Host.NativeWindow
                     $"[VST Window] Failed to register window class. Error: {Marshal.GetLastWin32Error()}");
 
             _hwnd = CreateWindowEx(0, _windowClassName, title,
-                WS_VST_WINDOW | WS_VISIBLE,
+                WS_VST_WINDOW,
                 CW_USEDEFAULT, CW_USEDEFAULT, width, height,
                 IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
@@ -192,12 +195,24 @@ namespace OwnVST3Host.NativeWindow
                 throw new InvalidOperationException(
                     $"[VST Window] Failed to create window. Error: {Marshal.GetLastWin32Error()}");
 
-            ShowWindow(_hwnd, 1);
-            UpdateWindow(_hwnd);
+            // Window is created hidden. Call Show() after the plugin editor is attached
+            // so that the parent and plugin child windows become visible together
+            // (Steinberg editorhost reference: show window AFTER IPlugView::attached).
             // Avalonia's message loop on the calling thread services this HWND from here on.
         }
 
         public IntPtr GetHandle() => _hwnd;
+
+        /// <summary>
+        /// Shows the window after the plugin editor has been attached.
+        /// Matches Steinberg editorhost: SetWindowPos with SWP_SHOWWINDOW after attached().
+        /// </summary>
+        public void Show()
+        {
+            if (_hwnd == IntPtr.Zero) return;
+            SetWindowPos(_hwnd, IntPtr.Zero, 0, 0, 0, 0,
+                SWP_NOSIZE | SWP_NOMOVE | SWP_NOCOPYBITS | SWP_SHOWWINDOW);
+        }
 
         /// <summary>
         /// Synchronously invokes an action on the creator thread.
