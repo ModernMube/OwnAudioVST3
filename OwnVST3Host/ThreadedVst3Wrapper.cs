@@ -143,9 +143,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             IsBackground = true,
             Priority = ThreadPriority.Normal
         };
-        if (OperatingSystem.IsWindows())
-            _pluginThread.SetApartmentState(ApartmentState.STA);
-
         _pluginThread.Start();
     }
 
@@ -368,10 +365,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 
     private void PluginThreadProc()
     {
-        if (OperatingSystem.IsWindows())
-            PluginThreadProcWindows();
-        else
-            PluginThreadProcGeneric();
+        PluginThreadProcGeneric();
     }
 
     private void PluginThreadProcWindows()
