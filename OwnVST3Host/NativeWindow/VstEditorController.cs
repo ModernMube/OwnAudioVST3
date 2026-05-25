@@ -112,7 +112,11 @@ namespace OwnVST3Host.NativeWindow
             EditorSize? size = await _getEditorSizeAsync().ConfigureAwait(true);
 
             var editorSize = size ?? new EditorSize(800, 600);
-            OpenEditorCore(windowTitle, editorSize);
+
+            if (OperatingSystem.IsWindows())
+                await OpenEditorCoreWindowsAsync(windowTitle, editorSize);
+            else
+                OpenEditorCore(windowTitle, editorSize);
         }
 
         /// <summary>
@@ -150,6 +154,52 @@ namespace OwnVST3Host.NativeWindow
             catch (Exception ex)
             {
                 Console.WriteLine($"[VST Editor] Error in CloseEditor: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Windows-specific editor creation. Mirrors the macOS strategy exactly:
+        /// on macOS everything (NSWindow, NSView, VST subviews) lives on the main thread.
+        /// Here the HWND is created on the Avalonia UI thread (creator thread) so that
+        /// the parent window and all VST child windows created during CreateEditor share
+        /// the same message thread. Avalonia's message loop services all of them.
+        ///
+        /// This eliminates cross-thread SendMessage between parent and children that
+        /// caused deadlocks and the frozen white window with JUCE-based plugins and others
+        /// that call SendMessage on the parent HWND during IPlugView::attached().
+        ///
+        /// The Task.Delay gives DWM time to finish compositing the window before the
+        /// plugin attaches its child HWND — without this, some plugins (e.g. TDR Nova)
+        /// only see a white window because the compositor hasn't finished initializing.
+        /// </summary>
+        private async Task OpenEditorCoreWindowsAsync(string windowTitle, EditorSize editorSize)
+        {
+            try
+            {
+                _nativeWindow = NativeWindowFactory.Create();
+                _nativeWindow.OnClosed += OnWindowClosed;
+                _nativeWindow.OnResize += OnWindowResized;
+
+                _nativeWindow.Open(windowTitle, editorSize.Width, editorSize.Height);
+
+                await Task.Delay(50).ConfigureAwait(true);
+
+                IntPtr windowHandle = _nativeWindow.GetHandle();
+
+                bool success = _vst3Wrapper.CreateEditor(windowHandle);
+
+                if (!success)
+                {
+                    CloseEditor();
+                    throw new InvalidOperationException("Failed to create VST editor.");
+                }
+
+                StartIdleThread();
+            }
+            catch
+            {
+                CloseEditor();
+                throw;
             }
         }
 
@@ -245,7 +295,11 @@ namespace OwnVST3Host.NativeWindow
                             var win = _nativeWindow;
                             win?.BeginInvoke(() =>
                             {
-                                try { _vst3Wrapper.ProcessIdle(); }
+                                try
+                                {
+                                    if (_nativeWindow != null)
+                                        _vst3Wrapper.ProcessIdle();
+                                }
                                 catch (Exception ex)
                                 { Console.WriteLine($"[VST Editor] ProcessIdle error: {ex.Message}"); }
                                 finally { Interlocked.Exchange(ref _idlePending, 0); }
