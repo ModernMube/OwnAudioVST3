@@ -87,5 +87,12 @@ namespace OwnVST3Host.NativeWindow
         /// On macOS and Linux this falls through to BeginInvoke().
         /// </summary>
         void BeginInvokePlugin(Action action) => BeginInvoke(action);
+
+        /// <summary>
+        /// Runs the native message loop on the calling thread until the window is destroyed.
+        /// On Windows: standard Win32 GetMessage loop. No-op on other platforms.
+        /// Must be called from the same thread that created the window (after Open()).
+        /// </summary>
+        void RunMessageLoop() { }
     }
 }

@@ -149,6 +149,26 @@ namespace OwnVST3Host.NativeWindow
         [DllImport("user32.dll")]
         private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+        [DllImport("user32.dll")]
+        private static extern int GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+        [DllImport("user32.dll")]
+        private static extern bool TranslateMessage(ref MSG lpMsg);
+
+        [DllImport("user32.dll", EntryPoint = "DispatchMessageW")]
+        private static extern IntPtr DispatchMsg(ref MSG lpmsg);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MSG
+        {
+            public IntPtr hwnd;
+            public uint   message;
+            public IntPtr wParam;
+            public IntPtr lParam;
+            public uint   time;
+            public int    ptX, ptY;
+        }
+
         private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
         #endregion
@@ -287,10 +307,27 @@ namespace OwnVST3Host.NativeWindow
                         pending.Exception = new ObjectDisposedException("Window destroyed");
                         pending.SyncSignal?.Set();
                     }
+                    PostQuitMessage(0);
                     return IntPtr.Zero;
             }
 
             return DefWindowProc(hWnd, msg, wParam, lParam);
+        }
+
+        /// <summary>
+        /// Runs the standard Win32 GetMessage loop on the calling thread until
+        /// WM_DESTROY posts WM_QUIT (i.e. until the window is closed).
+        /// Must be called from the same thread that created the window.
+        /// </summary>
+        public void RunMessageLoop()
+        {
+            int ret;
+            while ((ret = GetMessage(out MSG msg, IntPtr.Zero, 0, 0)) != 0)
+            {
+                if (ret == -1) break;
+                TranslateMessage(ref msg);
+                DispatchMsg(ref msg);
+            }
         }
 
         /// <summary>

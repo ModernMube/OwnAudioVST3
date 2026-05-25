@@ -24,6 +24,12 @@ namespace OwnVST3Host.NativeWindow
         private readonly ThreadedVst3Wrapper? _threadedWrapper;
 
         /// <summary>
+        /// Dedicated STA thread that owns the editor window and runs the Win32 message loop.
+        /// Windows-only; null on other platforms.
+        /// </summary>
+        private Thread? _editorThread;
+
+        /// <summary>
         /// The native window instance.
         /// </summary>
         private INativeWindow? _nativeWindow;
@@ -116,15 +122,8 @@ namespace OwnVST3Host.NativeWindow
 
             var editorSize = size ?? new EditorSize(800, 600);
 
-            if (OperatingSystem.IsWindows() && _threadedWrapper != null)
-            {
-                await _threadedWrapper.RunOnPluginThreadAsync(() => OpenEditorCore(windowTitle, editorSize));
-            }
-            else if (OperatingSystem.IsWindows())
-            {
-                await Task.Run(() => OpenEditorCore(windowTitle, editorSize))
-                          .ConfigureAwait(true);
-            }
+            if (OperatingSystem.IsWindows())
+                await OpenEditorOnDedicatedThread(windowTitle, editorSize);
             else
                 OpenEditorCore(windowTitle, editorSize);
         }
@@ -164,6 +163,36 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
+        /// Windows: starts a fresh STA editor thread, calls OpenEditorCore on it,
+        /// then keeps the thread alive running a standard Win32 GetMessage loop.
+        /// This matches the threading model that JUCE-based plugins expect: the thread
+        /// that calls attached() also owns the message pump for the editor's lifetime.
+        /// </summary>
+        private Task OpenEditorOnDedicatedThread(string windowTitle, EditorSize editorSize)
+        {
+            var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _editorThread = new Thread(() =>
+            {
+                try
+                {
+                    OpenEditorCore(windowTitle, editorSize);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                    return;
+                }
+                tcs.TrySetResult();
+                _nativeWindow?.RunMessageLoop();
+            });
+            _editorThread.Name = "VST Editor Thread";
+            _editorThread.SetApartmentState(ApartmentState.STA);
+            _editorThread.IsBackground = true;
+            _editorThread.Start();
+            return tcs.Task;
+        }
+
+        /// <summary>
         /// Creates the native window and attaches the VST editor. Platform-agnostic.
         /// On Windows, Invoke routes to the dedicated plugin STA thread (same as macOS/Linux).
         /// </summary>
@@ -191,10 +220,6 @@ namespace OwnVST3Host.NativeWindow
                     throw new InvalidOperationException("Failed to create VST editor.");
                 }
 
-                // Post ResizeEditor to the message queue so that any plugin-internal
-                // init messages posted during attached() (e.g. JUCE WM_USER+123) are
-                // dispatched first. Calling ResizeEditor synchronously before those
-                // messages are processed can crash JUCE-based plugins (TDR Nova).
                 _nativeWindow.BeginInvoke(() => _vst3Wrapper.ResizeEditor(editorSize.Width, editorSize.Height));
                 
                 _nativeWindow.Show();
