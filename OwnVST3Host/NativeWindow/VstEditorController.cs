@@ -21,6 +21,8 @@ namespace OwnVST3Host.NativeWindow
         /// </summary>
         private readonly Func<Task<EditorSize?>> _getEditorSizeAsync;
 
+        private readonly ThreadedVst3Wrapper? _threadedWrapper;
+
         /// <summary>
         /// The native window instance.
         /// </summary>
@@ -71,6 +73,7 @@ namespace OwnVST3Host.NativeWindow
         public VstEditorController(ThreadedVst3Wrapper threaded)
         {
             if (threaded == null) throw new ArgumentNullException(nameof(threaded));
+            _threadedWrapper = threaded;
             _vst3Wrapper = threaded.InnerWrapper;
             _getEditorSizeAsync = () => Task.FromResult(_vst3Wrapper.GetEditorSize());
         }
@@ -113,8 +116,15 @@ namespace OwnVST3Host.NativeWindow
 
             var editorSize = size ?? new EditorSize(800, 600);
 
-            if (OperatingSystem.IsWindows())
-                OpenEditorCoreWindows(windowTitle, editorSize);
+            if (OperatingSystem.IsWindows() && _threadedWrapper != null)
+            {
+                await _threadedWrapper.RunOnPluginThreadAsync(() => OpenEditorCore(windowTitle, editorSize));
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                await Task.Run(() => OpenEditorCore(windowTitle, editorSize))
+                          .ConfigureAwait(true);
+            }
             else
                 OpenEditorCore(windowTitle, editorSize);
         }
@@ -134,16 +144,12 @@ namespace OwnVST3Host.NativeWindow
                     var win = _nativeWindow;
                     _nativeWindow = null;
 
-                    Action doClose = () =>
+                    win.Invoke(() =>
                     {
                         try { _vst3Wrapper.CloseEditor(); }
                         catch (Exception ex)
                         { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
-                    };
-                    if (OperatingSystem.IsMacOS())
-                        win.Invoke(doClose);
-                    else
-                        doClose();
+                    });
 
                     win.OnClosed -= OnWindowClosed;
                     win.OnResize -= OnWindowResized;
@@ -158,61 +164,9 @@ namespace OwnVST3Host.NativeWindow
         }
 
         /// <summary>
-        /// Windows-specific editor creation. Mirrors the macOS strategy exactly:
-        /// on macOS everything (NSWindow, NSView, VST subviews) lives on the main thread.
-        /// Here the HWND is created on the Avalonia UI thread (creator thread) so that
-        /// the parent window and all VST child windows created during CreateEditor share
-        /// the same message thread. Avalonia's message loop services all of them.
-        ///
-        /// This eliminates cross-thread SendMessage between parent and children that
-        /// caused deadlocks and the frozen white window with JUCE-based plugins and others
-        /// that call SendMessage on the parent HWND during IPlugView::attached().
-        ///
-        /// The Task.Delay gives DWM time to finish compositing the window before the
-        /// plugin attaches its child HWND — without this, some plugins (e.g. TDR Nova)
-        /// only see a white window because the compositor hasn't finished initializing.
+        /// Creates the native window and attaches the VST editor. Platform-agnostic.
+        /// On Windows, Invoke routes to the dedicated plugin STA thread (same as macOS/Linux).
         /// </summary>
-        private void OpenEditorCoreWindows(string windowTitle, EditorSize editorSize)
-        {
-            try
-            {
-                _nativeWindow = NativeWindowFactory.Create();
-                _nativeWindow.OnClosed += OnWindowClosed;
-                _nativeWindow.OnResize += OnWindowResized;
-
-                // Create the HWND hidden — the plugin attaches its child windows to a
-                // hidden parent, then Show() makes everything visible at once.
-                // This matches the Steinberg editorhost reference: show AFTER attached().
-                _nativeWindow.Open(windowTitle, editorSize.Width, editorSize.Height);
-
-                IntPtr windowHandle = _nativeWindow.GetHandle();
-
-                bool success = _vst3Wrapper.CreateEditor(windowHandle);
-
-                if (!success)
-                {
-                    CloseEditor();
-                    throw new InvalidOperationException("Failed to create VST editor.");
-                }
-
-                // Show parent + plugin child windows together (no white flash).
-                _nativeWindow.Show();
-
-                StartIdleThread();
-            }
-            catch
-            {
-                CloseEditor();
-                throw;
-            }
-        }
-
-        /// <summary>
-        /// Core window and editor setup executed from the UI thread.
-        /// Initializes the native window and attaches the VST editor.
-        /// </summary>
-        /// <param name="windowTitle">The title of the window.</param>
-        /// <param name="editorSize">The initial size of the editor.</param>
         private void OpenEditorCore(string windowTitle, EditorSize editorSize)
         {
             try
@@ -226,14 +180,20 @@ namespace OwnVST3Host.NativeWindow
                 IntPtr windowHandle = _nativeWindow.GetHandle();
 
                 bool success = false;
-                _nativeWindow.Invoke(() => success = _vst3Wrapper.CreateEditor(windowHandle));
+                _nativeWindow.Invoke(() =>
+                {
+                    success = _vst3Wrapper.CreateEditor(windowHandle);
+                    if (success)
+                        _vst3Wrapper.ResizeEditor(editorSize.Width, editorSize.Height);
+                });
 
                 if (!success)
                 {
                     CloseEditor();
                     throw new InvalidOperationException("Failed to create VST editor.");
                 }
-
+                
+                _nativeWindow.Show();
                 StartIdleThread();
             }
             catch
@@ -298,7 +258,7 @@ namespace OwnVST3Host.NativeWindow
                             Interlocked.CompareExchange(ref _idlePending, 1, 0) == 0)
                         {
                             var win = _nativeWindow;
-                            win?.BeginInvoke(() =>
+                            Action idleAction = () =>
                             {
                                 try
                                 {
@@ -308,7 +268,8 @@ namespace OwnVST3Host.NativeWindow
                                 catch (Exception ex)
                                 { Console.WriteLine($"[VST Editor] ProcessIdle error: {ex.Message}"); }
                                 finally { Interlocked.Exchange(ref _idlePending, 0); }
-                            });
+                            };
+                            win?.BeginInvoke(idleAction);
                         }
                     }
                     catch (Exception ex)
@@ -334,10 +295,7 @@ namespace OwnVST3Host.NativeWindow
             try
             {
                 StopIdleThread();
-
-                // Unsubscribe events and clear _nativeWindow BEFORE calling CloseEditor.
-                // view->removed() can trigger WM_SIZE or WM_CLOSE callbacks on some plugins;
-                // clearing here prevents those from re-entering our handlers and double-closing.
+                
                 if (_nativeWindow != null)
                 {
                     _nativeWindow.OnClosed -= OnWindowClosed;
@@ -355,15 +313,18 @@ namespace OwnVST3Host.NativeWindow
 
         /// <summary>
         /// Handles the native window resized event.
-        /// Notifies the VST editor wrapper of the new dimensions.
+        /// Dispatches ResizeEditor to the plugin thread so it runs on the same thread as attached().
         /// </summary>
-        /// <param name="width">The new width.</param>
-        /// <param name="height">The new height.</param>
         private void OnWindowResized(int width, int height)
         {
-            try { _vst3Wrapper.ResizeEditor(width, height); }
-            catch (Exception ex)
-            { Console.WriteLine($"[VST Editor] Resize error: {ex.Message}"); }
+            var win = _nativeWindow;
+            if (win == null) return;
+            win.BeginInvoke(() =>
+            {
+                try { _vst3Wrapper.ResizeEditor(width, height); }
+                catch (Exception ex)
+                { Console.WriteLine($"[VST Editor] Resize error: {ex.Message}"); }
+            });
         }
 
         /// <summary>

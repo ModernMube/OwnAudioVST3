@@ -1,7 +1,52 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace OwnVST3Host;
+
+#region Win32 helpers (plugin-thread message pump)
+
+file static class Win32Pump
+{
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct MSG
+    {
+        public IntPtr hwnd;
+        public uint   message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint   time;
+        public int    ptX, ptY;
+    }
+
+    internal const uint QS_ALLINPUT = 0x04FF;
+    internal const uint PM_REMOVE   = 0x0001;
+    internal const uint WAIT_FAILED = 0xFFFFFFFF;
+
+    [DllImport("user32.dll")]
+    internal static extern uint MsgWaitForMultipleObjects(
+        uint nCount, IntPtr[] pHandles, bool bWaitAll, uint dwMilliseconds, uint dwWakeMask);
+
+    [DllImport("user32.dll")]
+    internal static extern bool PeekMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax, uint wRemoveMsg);
+
+    [DllImport("user32.dll")]
+    internal static extern bool TranslateMessage(ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr DispatchMessage(ref MSG lpmsg);
+
+    // OLE inicializáció – szükséges a JUCE és egyéb COM/UI-alapú pluginoknál
+    // (vágólap, Drag & Drop, ActiveX, OLE objektumok).
+    // Az STA + CoInitialize önmagában nem elegendő; OleInitialize hívása szükséges.
+    [DllImport("ole32.dll")]
+    internal static extern int OleInitialize(IntPtr pvReserved);
+
+    [DllImport("ole32.dll")]
+    internal static extern void OleUninitialize();
+}
+
+#endregion
 
 /// <summary>
 /// Thread-safe async façade over OwnVst3Wrapper.
@@ -30,10 +75,19 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 {
     private readonly OwnVst3Wrapper _inner;
     private readonly Thread _pluginThread;
-    private readonly BlockingCollection<Action> _cmdQueue;
+    private readonly ConcurrentQueue<Action> _cmdQueue = new();
+    private readonly AutoResetEvent _cmdReady = new(false);
     private readonly LockFreeQueue<VstStateChange> _stateQueue;
 
     private volatile bool _disposed;
+
+    // Windows-only: delegate to VST3Plugin_SafeDispatchMessage in the native DLL.
+    // That function wraps Win32 DispatchMessage() with a C++ __try/__except block
+    // that catches access violations (0xC0000005) from plugin WndProcs.
+    // The .NET runtime cannot catch these "corrupted state" SEH exceptions itself.
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void SafeDispatchDelegate(ref Win32Pump.MSG msg);
+    private SafeDispatchDelegate? _safeDispatch;
 
     private int _state = (int)VstPluginState.NotLoaded;
 
@@ -60,11 +114,28 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     /// </summary>
     public OwnVst3Wrapper InnerWrapper => _inner;
 
+    /// <summary>
+    /// Handle of the loaded native library. Exposed so that callers
+    /// (e.g. ThreadedVst3Wrapper) can resolve additional exports from the same
+    /// DLL via NativeLibrary.TryGetExport without loading the DLL a second time.
+    /// </summary>
+    public IntPtr LibraryHandle => _inner.LibraryHandle;
+
     public ThreadedVst3Wrapper(string? dllPath = null)
     {
         _inner = dllPath != null ? new OwnVst3Wrapper(dllPath) : new OwnVst3Wrapper();
-        _cmdQueue = new BlockingCollection<Action>(new ConcurrentQueue<Action>(), boundedCapacity: 128);
         _stateQueue = new LockFreeQueue<VstStateChange>(512);
+
+        // On Windows, try to resolve the SEH-safe DispatchMessage wrapper from the
+        // native DLL.  NativeLibrary.TryGetExport works on the already-loaded handle
+        // so no extra LoadLibrary call is needed. Falls back to the direct P/Invoke
+        // if the export is absent (e.g. older native binary).
+        if (OperatingSystem.IsWindows())
+        {
+            if (NativeLibrary.TryGetExport(_inner.LibraryHandle,
+                    "VST3Plugin_SafeDispatchMessage", out IntPtr fnPtr))
+                _safeDispatch = Marshal.GetDelegateForFunctionPointer<SafeDispatchDelegate>(fnPtr);
+        }
 
         _pluginThread = new Thread(PluginThreadProc)
         {
@@ -72,6 +143,9 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             IsBackground = true,
             Priority = ThreadPriority.Normal
         };
+        if (OperatingSystem.IsWindows())
+            _pluginThread.SetApartmentState(ApartmentState.STA);
+
         _pluginThread.Start();
     }
 
@@ -294,7 +368,73 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 
     private void PluginThreadProc()
     {
-        foreach (var cmd in _cmdQueue.GetConsumingEnumerable())
+        if (OperatingSystem.IsWindows())
+            PluginThreadProcWindows();
+        else
+            PluginThreadProcGeneric();
+    }
+
+    private void PluginThreadProcWindows()
+    {
+        // Az OleInitialize elvégzi a teljes COM + OLE inicializációt az STA szálra.
+        // Ez tartalmaz mindent, amit a CoInitialize(Ex) nyújt, PLUSZ a szükséges
+        // OLE alrendszereket (vágólap, Drag & Drop, OLE objektumok) — amelyekre a
+        // JUCE alapú pluginok (pl. TDR Nova) támaszkodnak a belső ablakaik WndProc-jaiban.
+        Win32Pump.OleInitialize(IntPtr.Zero);
+        try
+        {
+            // Force Win32 to create a message queue for this thread before anything else.
+            Win32Pump.PeekMessage(out Win32Pump.MSG _, IntPtr.Zero, 0, 0, 0);
+
+            var handles = new IntPtr[] { _cmdReady.SafeWaitHandle.DangerousGetHandle() };
+
+            while (!_disposed)
+            {
+                uint r = Win32Pump.MsgWaitForMultipleObjects(1, handles, false, uint.MaxValue, Win32Pump.QS_ALLINPUT);
+
+                if (r == Win32Pump.WAIT_FAILED)
+                    break;
+
+                DrainCommandQueue();
+
+                if (_disposed) break;
+
+                while (Win32Pump.PeekMessage(out Win32Pump.MSG msg, IntPtr.Zero, 0, 0, Win32Pump.PM_REMOVE))
+                {
+                    Win32Pump.TranslateMessage(ref msg);
+                    // Use the SEH-safe wrapper from the native DLL when available.
+                    // This prevents 0xC0000005 access violations inside plugin WndProcs
+                    // (e.g. TDR Nova / JUCE) from terminating the host process.
+                    if (_safeDispatch != null)
+                        _safeDispatch(ref msg);
+                    else
+                        Win32Pump.DispatchMessage(ref msg);
+                }
+            }
+
+            DrainCommandQueue();
+        }
+        finally
+        {
+            // Mindig párosítani kell az OleInitialize-t az OleUninitialize-vel,
+            // még akkor is, ha a szál kivétellel zárult le.
+            Win32Pump.OleUninitialize();
+        }
+    }
+
+    private void PluginThreadProcGeneric()
+    {
+        while (!_disposed)
+        {
+            _cmdReady.WaitOne();
+            DrainCommandQueue();
+        }
+        DrainCommandQueue();
+    }
+
+    private void DrainCommandQueue()
+    {
+        while (_cmdQueue.TryDequeue(out var cmd))
         {
             try { cmd(); }
             catch { }
@@ -305,13 +445,21 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, nameof(ThreadedVst3Wrapper));
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _cmdQueue.Add(() =>
+        _cmdQueue.Enqueue(() =>
         {
             try { tcs.SetResult(operation()); }
             catch (Exception ex) { tcs.SetException(ex); }
         });
+        _cmdReady.Set();
         return tcs.Task;
     }
+
+    /// <summary>
+    /// Executes an arbitrary action synchronously on the dedicated plugin thread.
+    /// This is used to ensure UI creation (CreateEditor) runs on the same thread as LoadPlugin.
+    /// </summary>
+    public Task RunOnPluginThreadAsync(Action action) =>
+        PostCommand(() => { action(); return true; });
 
     #endregion
 
@@ -327,12 +475,12 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 
         Interlocked.Exchange(ref _state, (int)VstPluginState.NotLoaded);
 
-        _cmdQueue.CompleteAdding();
+        _cmdReady.Set(); // wake the plugin thread so it can observe _disposed = true
         if (!_pluginThread.Join(2000))
             Console.WriteLine("[ThreadedVst3Wrapper] Plugin thread did not stop within 2 s.");
 
         _inner.Dispose();
-        _cmdQueue.Dispose();
+        _cmdReady.Dispose();
         GC.SuppressFinalize(this);
     }
 }

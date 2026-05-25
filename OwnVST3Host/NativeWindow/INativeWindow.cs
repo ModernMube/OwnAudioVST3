@@ -63,9 +63,29 @@ namespace OwnVST3Host.NativeWindow
         void Invoke(Action action);
 
         /// <summary>
+        /// Synchronously executes an action on a dedicated plugin thread while keeping
+        /// the window thread responsive to Win32 messages.
+        /// On Windows this runs the action on a separate STA thread that persists with
+        /// its own GetMessage loop for the lifetime of the plugin editor, while the
+        /// window thread pumps messages via PeekMessage during the action. This prevents
+        /// SendMessage deadlocks from JUCE-based plugins and ensures child windows created
+        /// by the plugin have a live message loop.
+        /// On macOS and Linux this falls through to Invoke().
+        /// </summary>
+        void InvokePlugin(Action action) => Invoke(action);
+
+        /// <summary>
         /// Asynchronously executes an action on the window's thread.
         /// Does not wait for the action to complete.
         /// </summary>
         void BeginInvoke(Action action);
+
+        /// <summary>
+        /// Asynchronously posts an action to the dedicated plugin thread.
+        /// On Windows this routes to the same STA plugin thread used by InvokePlugin,
+        /// ensuring IPlugView::onIdle() runs on the same thread as IPlugView::attached().
+        /// On macOS and Linux this falls through to BeginInvoke().
+        /// </summary>
+        void BeginInvokePlugin(Action action) => BeginInvoke(action);
     }
 }

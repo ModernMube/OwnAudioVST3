@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -329,6 +329,13 @@ namespace OwnVST3Host
         /// for any dispatch_sync(main_queue,...) calls the plugin makes during teardown.
         /// </summary>
         public static SynchronizationContext? MainThreadSyncContext { get; set; }
+
+    /// <summary>
+    /// Handle of the loaded native library. Used by ThreadedVst3Wrapper to resolve
+    /// additional exports (e.g. VST3Plugin_SafeDispatchMessage) without loading the
+    /// DLL a second time.
+    /// </summary>
+    public IntPtr LibraryHandle => _libraryHandle;
 
         #region macOS GCD drain-signal helpers
 
