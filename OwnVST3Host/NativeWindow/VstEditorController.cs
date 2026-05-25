@@ -248,6 +248,7 @@ namespace OwnVST3Host.NativeWindow
         /// </summary>
         private void StartIdleThread()
         {
+            Interlocked.Exchange(ref _idlePending, 0);
             _idleCancellation = new CancellationTokenSource();
             _idleThread = new Thread(IdleThreadProc)
             {

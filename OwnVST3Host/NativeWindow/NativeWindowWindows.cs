@@ -187,7 +187,7 @@ namespace OwnVST3Host.NativeWindow
                     $"[VST Window] Failed to register window class. Error: {Marshal.GetLastWin32Error()}");
 
             _hwnd = CreateWindowEx(0, _windowClassName, title,
-                WS_VST_WINDOW,
+                WS_VST_WINDOW | WS_VISIBLE,
                 CW_USEDEFAULT, CW_USEDEFAULT, width, height,
                 IntPtr.Zero, IntPtr.Zero, hInstance, IntPtr.Zero);
 
