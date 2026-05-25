@@ -183,8 +183,6 @@ namespace OwnVST3Host.NativeWindow
                 _nativeWindow.Invoke(() =>
                 {
                     success = _vst3Wrapper.CreateEditor(windowHandle);
-                    if (success)
-                        _vst3Wrapper.ResizeEditor(editorSize.Width, editorSize.Height);
                 });
 
                 if (!success)
@@ -192,6 +190,12 @@ namespace OwnVST3Host.NativeWindow
                     CloseEditor();
                     throw new InvalidOperationException("Failed to create VST editor.");
                 }
+
+                // Post ResizeEditor to the message queue so that any plugin-internal
+                // init messages posted during attached() (e.g. JUCE WM_USER+123) are
+                // dispatched first. Calling ResizeEditor synchronously before those
+                // messages are processed can crash JUCE-based plugins (TDR Nova).
+                _nativeWindow.BeginInvoke(() => _vst3Wrapper.ResizeEditor(editorSize.Width, editorSize.Height));
                 
                 _nativeWindow.Show();
                 StartIdleThread();
