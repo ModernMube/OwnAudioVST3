@@ -7,7 +7,7 @@ namespace OwnVST3Host
     /// </summary>
     public partial class OwnVst3Wrapper
     {
-#nullable disable
+#nullable disable warnings
         #region Public API methods
 
         /// <summary>
@@ -505,6 +505,6 @@ namespace OwnVST3Host
         }
 
         #endregion
-#nullable restore
+#nullable restore warnings
     }
 }

@@ -9,7 +9,7 @@ namespace OwnVST3Host
     /// </summary>
     public partial class OwnVst3Wrapper : IDisposable
     {
-#nullable disable
+#nullable disable warnings
         #region Private fields
 
         private IntPtr _pluginHandle;
@@ -41,7 +41,7 @@ namespace OwnVST3Host
         private VST3Plugin_IsMidiOnlyDelegate? _isMidiOnlyFunc;
         private VST3Plugin_GetNameDelegate _getNameFunc;
         private VST3Plugin_GetVendorDelegate _getVendorFunc;
-        private VST3Plugin_GetVersionDelegate _getVersionFunc;
+        private VST3Plugin_GetVersionDelegate? _getVersionFunc;
         private VST3Plugin_GetPluginInfoDelegate _getPluginInfoFunc;
         private VST3Plugin_ClearStringCacheDelegate _clearStringCacheFunc;
         private VST3Plugin_ProcessIdleDelegate? _processIdleFunc;
@@ -434,6 +434,6 @@ namespace OwnVST3Host
             }
         }
         #endregion
-#nullable restore
+#nullable restore warnings
     }
 }

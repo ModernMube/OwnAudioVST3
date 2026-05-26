@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.Versioning;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -182,6 +183,7 @@ namespace OwnVST3Host.NativeWindow
         /// This matches the threading model that JUCE-based plugins expect: the thread
         /// that calls attached() also owns the message pump for the editor's lifetime.
         /// </summary>
+        [SupportedOSPlatform("windows")]
         private Task OpenEditorOnDedicatedThread(string windowTitle, EditorSize editorSize)
         {
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -219,8 +221,7 @@ namespace OwnVST3Host.NativeWindow
                     // On macOS JUCE creates and owns its own NSWindow via DocumentWindow.
                     // Passing IntPtr.Zero lets JUCE manage the window; creating a NativeWindowMac
                     // here would open a second, empty window alongside the plugin editor.
-                    bool success = _vst3Wrapper.CreateEditor(IntPtr.Zero);
-                    if (!success)
+                    if (!_vst3Wrapper.CreateEditor(IntPtr.Zero))
                         throw new InvalidOperationException("Failed to create VST editor.");
                     _macEditorOpen = true;
                     StartIdleThread();

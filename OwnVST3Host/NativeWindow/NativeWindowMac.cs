@@ -53,7 +53,9 @@ namespace OwnVST3Host.NativeWindow
         /// <summary>
         /// Occurs when the window is resized.
         /// </summary>
+#pragma warning disable CS0067
         public event Action<int, int>? OnResize;
+#pragma warning restore CS0067
 
         /// <summary>
         /// Occurs when the window is closed.
