@@ -96,16 +96,28 @@ elseif(UNIX)
         PREFIX      "lib"
         SUFFIX      ".so"
     )
-    # JUCE on Linux needs X11, Freetype, and ALSA at minimum.
-    find_package(X11 REQUIRED)
-    find_package(Freetype REQUIRED)
     find_package(Threads REQUIRED)
-    target_link_libraries(ownvst3 PRIVATE
-        X11::X11
-        X11::Xext
-        Freetype::Freetype
-        asound
-        dl
-        Threads::Threads
-    )
+
+    if(CMAKE_CROSSCOMPILING)
+        # Ubuntu multiarch cross-compile: CMake's find_package(X11) cannot locate
+        # headers/libs under the FIND_ROOT_PATH because Ubuntu installs multiarch
+        # packages to /usr/include and /usr/lib/<triple>, not /usr/<triple>/.
+        # Pass library names directly — the aarch64-linux-gnu toolchain already
+        # has /usr/lib/aarch64-linux-gnu in its default search path.
+        target_include_directories(ownvst3 PRIVATE /usr/include)
+        target_link_libraries(ownvst3 PRIVATE
+            X11 Xext freetype asound dl Threads::Threads
+        )
+    else()
+        find_package(X11 REQUIRED)
+        find_package(Freetype REQUIRED)
+        target_link_libraries(ownvst3 PRIVATE
+            X11::X11
+            X11::Xext
+            Freetype::Freetype
+            asound
+            dl
+            Threads::Threads
+        )
+    endif()
 endif()
