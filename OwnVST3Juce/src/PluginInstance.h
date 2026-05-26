@@ -155,7 +155,7 @@ private:
     public:
         explicit PluginPlayHead(PluginInstance& owner) noexcept : _owner(owner) {}
 
-        std::optional<PositionInfo> getPosition() const override;
+        juce::Optional<PositionInfo> getPosition() const override;
 
     private:
         PluginInstance& _owner;

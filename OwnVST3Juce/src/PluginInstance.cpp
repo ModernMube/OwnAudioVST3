@@ -1,6 +1,7 @@
 #include "PluginInstance.h"
 
 #if defined(_WIN32)
+    #define NOMINMAX
     #include <windows.h>
 #endif
 
@@ -87,7 +88,7 @@ static void initJuceOnce()
  * PluginPlayHead – feeds transport info to the plugin on the audio thread
  * ────────────────────────────────────────────────────────────────────────────*/
 
-std::optional<juce::AudioPlayHead::PositionInfo>
+juce::Optional<juce::AudioPlayHead::PositionInfo>
 PluginInstance::PluginPlayHead::getPosition() const
 {
     juce::AudioPlayHead::PositionInfo info;
@@ -124,7 +125,7 @@ PluginInstance::~PluginInstance()
 
     if (_editorWindow)
     {
-        juce::MessageManager::callFunctionOnMessageThread(
+        juce::MessageManager::getInstance()->callFunctionOnMessageThread(
             [](void* ctx) -> void*
             {
                 static_cast<PluginInstance*>(ctx)->_editorWindow.reset();
