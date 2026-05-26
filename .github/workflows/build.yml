@@ -93,20 +93,24 @@ jobs:
             libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev \
             libfreetype6-dev libfontconfig1-dev libasound2-dev libgl1-mesa-dev
 
-          # Enable ARM64 packages from ports mirror
+          # Enable ARM64 packages from ports.ubuntu.com
           sudo dpkg --add-architecture arm64
-          sudo bash -c 'cat >> /etc/apt/sources.list <<EOF
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe
-          EOF'
-          # Restrict existing entries to amd64 only to avoid conflicts
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list
-          sudo apt-get update || true
+          CODENAME=$(lsb_release -cs)
+          # Write ARM64 source to a separate file so the sed below does not touch it
+          printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports %s main restricted universe\n' \
+            "$CODENAME" | sudo tee    /etc/apt/sources.list.d/arm64.list
+          printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports %s-updates main restricted universe\n' \
+            "$CODENAME" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          # Restrict ALL existing sources to amd64 (handles both http:// and https://)
+          sudo sed -i '/^deb / { /\[arch=/! s/^deb /deb [arch=amd64] / }' /etc/apt/sources.list
+          sudo find /etc/apt/sources.list.d -name '*.list' ! -name 'arm64.list' \
+            -exec sudo sed -i '/^deb / { /\[arch=/! s/^deb /deb [arch=amd64] / }' {} \;
+          sudo apt-get update
           sudo apt-get install -y \
             libx11-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 \
             libxcursor-dev:arm64 libxext-dev:arm64 \
             libfreetype6-dev:arm64 libfontconfig1-dev:arm64 libasound2-dev:arm64 \
-            libgl1-mesa-dev:arm64 || true
+            libgl1-mesa-dev:arm64
 
       # ── JUCE FetchContent cache (avoids re-downloading on every CI run) ──
       - name: Cache JUCE source
