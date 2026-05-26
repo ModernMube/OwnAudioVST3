@@ -85,9 +85,13 @@ jobs:
         if: matrix.rid == 'linux-arm64'
         run: |
           sudo apt-get update
+          # Cross-compile toolchain + native host libs (juceaide runs on x86_64
+          # and must compile juce_gui_basics, so native X11/freetype are required)
           sudo apt-get install -y cmake ninja-build \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu
+            binutils-aarch64-linux-gnu \
+            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev \
+            libfreetype6-dev libfontconfig1-dev libasound2-dev libgl1-mesa-dev
 
           # Enable ARM64 packages from ports mirror
           sudo dpkg --add-architecture arm64
