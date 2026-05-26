@@ -102,9 +102,10 @@ elseif(UNIX)
         # Ubuntu multiarch cross-compile: CMake's find_package(X11) cannot locate
         # headers/libs under the FIND_ROOT_PATH because Ubuntu installs multiarch
         # packages to /usr/include and /usr/lib/<triple>, not /usr/<triple>/.
-        # Pass library names directly — the aarch64-linux-gnu toolchain already
-        # has /usr/lib/aarch64-linux-gnu in its default search path.
+        # Explicitly add the multiarch library dir so the cross-linker finds the
+        # ARM64 .so stubs installed by libx11-dev:arm64 etc.
         target_include_directories(ownvst3 PRIVATE /usr/include)
+        target_link_directories(ownvst3 PRIVATE /usr/lib/aarch64-linux-gnu)
         target_link_libraries(ownvst3 PRIVATE
             X11 Xext freetype asound dl Threads::Threads
         )
