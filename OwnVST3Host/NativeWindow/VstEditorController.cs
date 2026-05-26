@@ -50,6 +50,11 @@ namespace OwnVST3Host.NativeWindow
         private bool _disposed;
 
         /// <summary>
+        /// macOS only: true while JUCE owns and manages the editor window directly.
+        /// </summary>
+        private bool _macEditorOpen;
+
+        /// <summary>
         /// Throttle flag for pending idle processing invocations.
         /// Value is 0 if free, 1 if a pending invocation exists.
         /// </summary>
@@ -87,7 +92,7 @@ namespace OwnVST3Host.NativeWindow
         /// <summary>
         /// Gets a value indicating whether the editor window is currently open.
         /// </summary>
-        public bool IsOpen => _nativeWindow?.IsOpen ?? false;
+        public bool IsOpen => _macEditorOpen || (_nativeWindow?.IsOpen ?? false);
 
         /// <summary>
         /// Gets a value indicating whether the editor is open.
@@ -137,6 +142,15 @@ namespace OwnVST3Host.NativeWindow
             try
             {
                 StopIdleThread();
+
+                if (OperatingSystem.IsMacOS() && _macEditorOpen)
+                {
+                    _macEditorOpen = false;
+                    try { _vst3Wrapper.CloseEditor(); }
+                    catch (Exception ex)
+                    { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
+                    return;
+                }
 
                 if (_nativeWindow != null)
                 {
@@ -200,6 +214,19 @@ namespace OwnVST3Host.NativeWindow
         {
             try
             {
+                if (OperatingSystem.IsMacOS())
+                {
+                    // On macOS JUCE creates and owns its own NSWindow via DocumentWindow.
+                    // Passing IntPtr.Zero lets JUCE manage the window; creating a NativeWindowMac
+                    // here would open a second, empty window alongside the plugin editor.
+                    bool success = _vst3Wrapper.CreateEditor(IntPtr.Zero);
+                    if (!success)
+                        throw new InvalidOperationException("Failed to create VST editor.");
+                    _macEditorOpen = true;
+                    StartIdleThread();
+                    return;
+                }
+
                 _nativeWindow = NativeWindowFactory.Create();
                 _nativeWindow.OnClosed += OnWindowClosed;
                 _nativeWindow.OnResize += OnWindowResized;

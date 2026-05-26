@@ -62,11 +62,10 @@ static void initJuceOnce()
 {
 #if defined(__APPLE__)
     juce::initialiseJuce_GUI();
-
-    std::atexit([]()
-    {
-        juce::shutdownJuce_GUI();
-    });
+    // shutdownJuce_GUI() is intentionally not called via atexit: during .NET
+    // process teardown the runtime has already freed Objective-C objects that
+    // JUCE's DeletedAtShutdown list still holds, causing SIGABRT in deleteAll().
+    // The OS reclaims all resources on process exit.
 #else
     s_messageThread = std::make_unique<JuceMessageThread>();
     s_messageThread->startThread(juce::Thread::Priority::high);
