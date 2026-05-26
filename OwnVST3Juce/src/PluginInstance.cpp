@@ -460,7 +460,7 @@ bool PluginInstance::createEditor(void* ownerWindowHandle)
     struct Ctx { PluginInstance* self; void* owner; bool result; };
     Ctx ctx{ this, ownerWindowHandle, false };
 
-    juce::MessageManager::callFunctionOnMessageThread(
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
@@ -495,7 +495,7 @@ void PluginInstance::closeEditor()
 {
     if (!_editorWindow) return;
 
-    juce::MessageManager::callFunctionOnMessageThread(
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
         [](void* raw) -> void*
         {
             static_cast<PluginInstance*>(raw)->_editorWindow.reset();
@@ -511,7 +511,7 @@ void PluginInstance::resizeEditor(int width, int height)
     struct Ctx { PluginInstance* self; int w; int h; };
     Ctx ctx{ this, width, height };
 
-    juce::MessageManager::callFunctionOnMessageThread(
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
         [](void* raw) -> void*
         {
             const auto& c = *static_cast<Ctx*>(raw);
@@ -534,7 +534,7 @@ bool PluginInstance::getEditorSize(int& width, int& height)
     struct Ctx { PluginInstance* self; int& w; int& h; bool result; };
     Ctx ctx{ this, width, height, false };
 
-    juce::MessageManager::callFunctionOnMessageThread(
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
