@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 project(ownvst3
     VERSION 2.0.0
     DESCRIPTION "JUCE-based VST3 host library exposing a stable C API for .NET P/Invoke."
-    LANGUAGES CXX
+    LANGUAGES C CXX
 )
 
 set(CMAKE_CXX_STANDARD 20)
