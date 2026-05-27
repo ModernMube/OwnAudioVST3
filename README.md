@@ -4,7 +4,7 @@
   <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="600"/>
 </p>
 
-A thread-safe, cross-platform C# library for hosting VST3 plugins. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other.
+A thread-safe, cross-platform C# library for hosting VST3 plugins. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is powered by [JUCE](https://juce.com/), providing broad plugin compatibility across all supported platforms.
 
 [![Build](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml/badge.svg)](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml)
 [![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnVst3Host/)
@@ -102,9 +102,9 @@ plugin.ProcessAudio(inputs, outputs, channels, samples);
 
 | Platform | Architecture | Window backend |
 |---|---|---|
-| Windows | x64, x86 | Win32 STA thread + message loop |
+| Windows | x64, x86, ARM64 | Win32 STA thread + message loop |
 | macOS | x64, ARM64 | Cocoa via GCD (`dispatch_sync` to main thread) |
-| Linux | x64 | X11 dedicated event loop thread |
+| Linux | x64, ARM64 | X11 dedicated event loop thread |
 
 Native libraries are resolved automatically from `runtimes/{rid}/native/` at runtime.
 
@@ -114,7 +114,7 @@ Native libraries are resolved automatically from `runtimes/{rid}/native/` at run
 
 ```
 OwnAudioVST3/
-├── OwnVST3Host/          # Main library
+├── OwnVST3Host/          # Main library (C#)
 │   ├── ThreadedVst3Wrapper.cs      # Primary API — thread-safe VST3 façade
 │   ├── OwnVst3Wrapper.cs           # Low-level native wrapper + platform detection
 │   ├── LockFreeQueue.cs            # SPSC ring buffer (UI → audio thread)
@@ -125,6 +125,23 @@ OwnAudioVST3/
 │       ├── NativeWindowLinux.cs    # X11 event loop thread
 │       ├── NativeWindowFactory.cs  # Runtime platform selector
 │       └── VstEditorController.cs  # Editor lifecycle manager
+├── OwnVST3Juce/          # Native JUCE-based backend (C++)
+│   ├── CMakeLists.txt              # Cross-platform build definition
+│   ├── include/ownvst3_exports.h   # C ABI exported by the native library
+│   └── src/
+│       ├── PluginInstance.cpp/h    # JUCE AudioPluginInstance host wrapper
+│       ├── EditorWindow.cpp/h      # Native plugin editor window management
+│       ├── Exports.cpp             # P/Invoke entry points
+│       ├── SpscQueue.h             # Lock-free parameter queue
+│       └── StringCache.cpp/h       # Thread-safe string interning
+├── runtimes/             # Pre-built native libraries per RID
+│   ├── win-x64/native/ownvst3.dll
+│   ├── win-x86/native/ownvst3.dll
+│   ├── win-arm64/native/ownvst3.dll
+│   ├── osx-arm64/native/libownvst3.dylib
+│   ├── osx-x64/native/libownvst3.dylib
+│   ├── linux-x64/native/libownvst3.so
+│   └── linux-arm64/native/libownvst3.so
 └── OwnVST3EditorDemo/    # Avalonia demo application
 ```
 
@@ -134,7 +151,7 @@ OwnAudioVST3/
 
 ```bash
 # Clone the repository
-git clone --recursive https://github.com/ModernMube/OwnVST3Sharp.git
+git clone https://github.com/ModernMube/OwnVST3Sharp.git
 cd OwnVST3Sharp
 
 # Build the library
@@ -143,6 +160,8 @@ dotnet build OwnVST3Host/OwnVST3Host.csproj --configuration Release
 # Run the demo
 dotnet run --project OwnVST3EditorDemo
 ```
+
+> **Native library**: Pre-built binaries for all platforms are included under `runtimes/`. To rebuild the C++ JUCE backend from source, see `OwnVST3Juce/CMakeLists.txt` — JUCE 8+ and CMake 3.22+ are required.
 
 ---
 
@@ -183,6 +202,6 @@ MIT License — see [LICENSE.txt](LICENSE.txt) for details.
 
 ## Acknowledgments
 
-- Built on the [VST3 SDK](https://github.com/steinbergmedia/vst3sdk)
+- Native plugin hosting powered by [JUCE](https://juce.com/)
 - UI rendering powered by [Avalonia UI](https://avaloniaui.net/)
 - Issues and contributions: [GitHub Issues](https://github.com/ModernMube/OwnVST3Sharp/issues)
