@@ -51,9 +51,10 @@ namespace OwnVST3Host.NativeWindow
         private bool _disposed;
 
         /// <summary>
-        /// macOS only: true while JUCE owns and manages the editor window directly.
+        /// True on macOS and Linux: JUCE owns and manages the editor window directly via DocumentWindow.
+        /// No NativeWindow is created on these platforms — passing IntPtr.Zero lets JUCE open its own window.
         /// </summary>
-        private bool _macEditorOpen;
+        private bool _juceOwnsWindow;
 
         /// <summary>
         /// Throttle flag for pending idle processing invocations.
@@ -93,7 +94,7 @@ namespace OwnVST3Host.NativeWindow
         /// <summary>
         /// Gets a value indicating whether the editor window is currently open.
         /// </summary>
-        public bool IsOpen => _macEditorOpen || (_nativeWindow?.IsOpen ?? false);
+        public bool IsOpen => _juceOwnsWindow || (_nativeWindow?.IsOpen ?? false);
 
         /// <summary>
         /// Gets a value indicating whether the editor is open.
@@ -144,9 +145,9 @@ namespace OwnVST3Host.NativeWindow
             {
                 StopIdleThread();
 
-                if (OperatingSystem.IsMacOS() && _macEditorOpen)
+                if ((OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()) && _juceOwnsWindow)
                 {
-                    _macEditorOpen = false;
+                    _juceOwnsWindow = false;
                     try { _vst3Wrapper.CloseEditor(); }
                     catch (Exception ex)
                     { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }
@@ -216,14 +217,16 @@ namespace OwnVST3Host.NativeWindow
         {
             try
             {
-                if (OperatingSystem.IsMacOS())
+                if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
                 {
-                    // On macOS JUCE creates and owns its own NSWindow via DocumentWindow.
-                    // Passing IntPtr.Zero lets JUCE manage the window; creating a NativeWindowMac
+                    // On macOS and Linux, JUCE creates and owns its own native window via DocumentWindow.
+                    // Passing IntPtr.Zero lets JUCE manage the window entirely; creating a NativeWindow
                     // here would open a second, empty window alongside the plugin editor.
+                    // (On Linux the windowHandle param is ignored in PluginInstance::createEditor anyway —
+                    //  only the Windows branch uses SetWindowLongPtr to reparent the JUCE hwnd.)
                     if (!_vst3Wrapper.CreateEditor(IntPtr.Zero))
                         throw new InvalidOperationException("Failed to create VST editor.");
-                    _macEditorOpen = true;
+                    _juceOwnsWindow = true;
                     StartIdleThread();
                     return;
                 }
@@ -310,7 +313,7 @@ namespace OwnVST3Host.NativeWindow
                 {
                     try
                     {
-                        if (!OperatingSystem.IsMacOS() &&
+                        if (!_juceOwnsWindow &&
                             !_disposed && _nativeWindow != null &&
                             Interlocked.CompareExchange(ref _idlePending, 1, 0) == 0)
                         {
