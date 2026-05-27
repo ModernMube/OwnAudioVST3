@@ -170,6 +170,12 @@ OWNVST3_API void VST3Plugin_ResetTransportPosition(VST3PluginHandle handle)
 
 /* ── Editor ─────────────────────────────────────────────────────────────────── */
 
+OWNVST3_API bool VST3Plugin_HasEditor(VST3PluginHandle handle)
+{
+    if (!handle) return false;
+    return static_cast<PluginInstance*>(handle)->hasEditor();
+}
+
 OWNVST3_API bool VST3Plugin_CreateEditor(VST3PluginHandle handle, void* windowHandle)
 {
     if (!handle) return false;

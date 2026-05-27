@@ -22,6 +22,7 @@ EXPORTS
     VST3Plugin_SetTempo
     VST3Plugin_SetTransportState
     VST3Plugin_ResetTransportPosition
+    VST3Plugin_HasEditor
     VST3Plugin_CreateEditor
     VST3Plugin_CloseEditor
     VST3Plugin_ResizeEditor

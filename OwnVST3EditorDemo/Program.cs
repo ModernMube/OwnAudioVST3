@@ -210,12 +210,13 @@ public class MainWindow : Window
             bool isInstrument = await _plugin.GetIsInstrumentAsync();
             bool isEffect = await _plugin.GetIsEffectAsync();
             int paramCount = await _plugin.GetParameterCountAsync();
-            EditorSize? editorSize = await _plugin.GetEditorSizeAsync();
+            bool hasEditor = await _plugin.HasEditorAsync();
+            // Editor size is only available after the editor window is opened.
+            EditorSize? editorSize = null;
 
             // Back on the UI thread: update controls.
             UpdatePluginInfo(name, vendor, version, isInstrument, isEffect, paramCount, editorSize);
 
-            bool hasEditor = editorSize.HasValue;
             _openEditorButton.IsEnabled = hasEditor;
             _playButton.IsEnabled = true;
             _statusText.Text = hasEditor

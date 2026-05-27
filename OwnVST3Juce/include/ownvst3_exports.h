@@ -187,6 +187,15 @@ OWNVST3_API void VST3Plugin_ResetTransportPosition(VST3PluginHandle handle);
 /* ── Editor window ─────────────────────────────────────────────────────────── */
 
 /**
+ * Returns true if the plugin has an editor UI.
+ * Safe to call from any thread; does NOT create a temporary editor component.
+ * Use this to decide whether to show an open-editor action.  The actual pixel
+ * dimensions are only available via VST3Plugin_GetEditorSize() once the editor
+ * is open.
+ */
+OWNVST3_API bool VST3Plugin_HasEditor(VST3PluginHandle handle);
+
+/**
  * Opens the plugin editor in a JUCE-managed top-level window.
  * windowHandle is used as the Win32 owner window on Windows (not as a parent/embed target).
  * Must be called from the UI thread.

@@ -521,6 +521,11 @@ void PluginInstance::resizeEditor(int width, int height)
         &ctx);
 }
 
+bool PluginInstance::hasEditor() const
+{
+    return _plugin && _plugin->hasEditor();
+}
+
 bool PluginInstance::getEditorSize(int& width, int& height)
 {
     if (!_plugin) return false;
@@ -528,29 +533,13 @@ bool PluginInstance::getEditorSize(int& width, int& height)
     if (_editorWindow)
         return _editorWindow->getContentSize(width, height);
 
-    if (!_plugin->hasEditor()) return false;
-
-    struct Ctx { PluginInstance* self; int& w; int& h; bool result; };
-    Ctx ctx{ this, width, height, false };
-
-    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
-        [](void* raw) -> void*
-        {
-            auto& c = *static_cast<Ctx*>(raw);
-            auto* ed = c.self->_plugin->createEditor();
-            if (ed)
-            {
-                c.w      = ed->getWidth();
-                c.h      = ed->getHeight();
-                c.result = (c.w > 0 && c.h > 0);
-                c.self->_plugin->editorBeingDeleted(ed);
-                delete ed;
-            }
-            return nullptr;
-        },
-        &ctx);
-
-    return ctx.result;
+    // Do NOT create a temporary editor here: plugins that use OpenGL, background
+    // threads, or native window attachment during construction (e.g. TDR Nova)
+    // crash or deadlock when the component is created without a real native peer
+    // and then immediately deleted.  The caller should use hasEditor() to decide
+    // whether to show an open-editor action, and read the actual size from this
+    // function once the editor is open.
+    return false;
 }
 
 bool PluginInstance::isEditorOpen() const

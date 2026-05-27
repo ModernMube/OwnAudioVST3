@@ -92,6 +92,7 @@ public:
     bool createEditor(void* ownerWindowHandle);
     void closeEditor();
     void resizeEditor(int width, int height);
+    bool hasEditor() const;
     bool getEditorSize(int& width, int& height);
     bool isEditorOpen() const;
     void processIdle();

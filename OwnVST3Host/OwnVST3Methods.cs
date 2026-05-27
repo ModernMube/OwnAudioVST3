@@ -468,6 +468,23 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Returns true if the plugin has an editor UI.
+        /// Safe to call from any thread; does NOT create a temporary editor component.
+        /// Falls back to checking GetEditorSize on older DLL versions.
+        /// </summary>
+        public bool HasEditor
+        {
+            get
+            {
+                CheckDisposed();
+                if (_hasEditorFunc != null)
+                    return _hasEditorFunc(_pluginHandle);
+                // Fallback for DLLs that pre-date VST3Plugin_HasEditor
+                return GetEditorSize(out _, out _);
+            }
+        }
+
+        /// <summary>
         /// Check if the editor window is currently open
         /// </summary>
         public bool IsEditorOpen

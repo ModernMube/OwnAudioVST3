@@ -81,14 +81,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 
     private volatile bool _disposed;
 
-    // Windows-only: delegate to VST3Plugin_SafeDispatchMessage in the native DLL.
-    // That function wraps Win32 DispatchMessage() with a C++ __try/__except block
-    // that catches access violations (0xC0000005) from plugin WndProcs.
-    // The .NET runtime cannot catch these "corrupted state" SEH exceptions itself.
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void SafeDispatchDelegate(ref Win32Pump.MSG msg);
-    private SafeDispatchDelegate? _safeDispatch;
-
     private int _state = (int)VstPluginState.NotLoaded;
 
     private volatile int _actualIn = 2;
@@ -125,17 +117,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     {
         _inner = dllPath != null ? new OwnVst3Wrapper(dllPath) : new OwnVst3Wrapper();
         _stateQueue = new LockFreeQueue<VstStateChange>(512);
-
-        // On Windows, try to resolve the SEH-safe DispatchMessage wrapper from the
-        // native DLL.  NativeLibrary.TryGetExport works on the already-loaded handle
-        // so no extra LoadLibrary call is needed. Falls back to the direct P/Invoke
-        // if the export is absent (e.g. older native binary).
-        if (OperatingSystem.IsWindows())
-        {
-            if (NativeLibrary.TryGetExport(_inner.LibraryHandle,
-                    "VST3Plugin_SafeDispatchMessage", out IntPtr fnPtr))
-                _safeDispatch = Marshal.GetDelegateForFunctionPointer<SafeDispatchDelegate>(fnPtr);
-        }
 
         _pluginThread = new Thread(PluginThreadProc)
         {
@@ -180,8 +161,11 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             return ok;
         });
 
+    public Task<bool> HasEditorAsync() =>
+        PostCommand(() => _inner.HasEditor);
+
     public Task<EditorSize?> GetEditorSizeAsync() =>
-        Task.FromResult(_inner.GetEditorSize());
+        PostCommand(() => _inner.GetEditorSize());
 
     public Task<int> GetParameterCountAsync() =>
         PostCommand(() => _inner.GetParameterCount());
@@ -402,13 +386,7 @@ public sealed class ThreadedVst3Wrapper : IDisposable
                 while (Win32Pump.PeekMessage(out Win32Pump.MSG msg, IntPtr.Zero, 0, 0, Win32Pump.PM_REMOVE))
                 {
                     Win32Pump.TranslateMessage(ref msg);
-                    // Use the SEH-safe wrapper from the native DLL when available.
-                    // This prevents 0xC0000005 access violations inside plugin WndProcs
-                    // (e.g. TDR Nova / JUCE) from terminating the host process.
-                    if (_safeDispatch != null)
-                        _safeDispatch(ref msg);
-                    else
-                        Win32Pump.DispatchMessage(ref msg);
+                    Win32Pump.DispatchMessage(ref msg);
                 }
             }
 
