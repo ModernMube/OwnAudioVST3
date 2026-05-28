@@ -265,12 +265,15 @@ bool PluginInstance::loadPlugin(const char* path)
 
 bool PluginInstance::initialize(double sampleRate, int blockSize)
 {
-    if (!_plugin) return false;
+    diagLog("initialize: enter");
+    if (!_plugin) { diagLog("initialize: no plugin"); return false; }
 
     _sampleRate = sampleRate;
     _blockSize  = blockSize;
 
+    diagLog("initialize: prepareToPlay start");
     _plugin->prepareToPlay(sampleRate, blockSize);
+    diagLog("initialize: prepareToPlay done");
 
     const int channels = std::max(
         _plugin->getTotalNumInputChannels(),
@@ -280,6 +283,7 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
     _juceBuffer.setSize(std::max(channels, 1), blockSize, false, true, false);
     _midiBuffer.ensureSize(static_cast<size_t>(blockSize));
 
+    diagLog("initialize: success");
     return true;
 }
 
@@ -545,8 +549,9 @@ void PluginInstance::resetTransportPosition()
 
 bool PluginInstance::createEditor(void* ownerWindowHandle)
 {
+    diagLog("createEditor: enter");
     if (_disposed.load(std::memory_order_relaxed)) return false;
-    if (!_plugin || !_plugin->hasEditor())          return false;
+    if (!_plugin || !_plugin->hasEditor())          { diagLog("createEditor: no editor"); return false; }
     if (_editorWindow)                              return true;
 
     struct Ctx { PluginInstance* self; void* owner; bool result; };
@@ -556,8 +561,10 @@ bool PluginInstance::createEditor(void* ownerWindowHandle)
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
+            diagLog("createEditor: createEditorIfNeeded start");
             auto* editor = c.self->_plugin->createEditorIfNeeded();
-            if (!editor) return nullptr;
+            diagLog("createEditor: createEditorIfNeeded done");
+            if (!editor) { diagLog("createEditor: editor is null"); return nullptr; }
 
             c.self->_editorWindow = std::make_unique<EditorWindow>(
                 editor,
@@ -575,11 +582,13 @@ bool PluginInstance::createEditor(void* ownerWindowHandle)
                                        reinterpret_cast<LONG_PTR>(c.owner));
             }
 #endif
+            diagLog("createEditor: EditorWindow created");
             c.result = true;
             return nullptr;
         },
         &ctx);
 
+    diagLog(ctx.result ? "createEditor: success" : "createEditor: failed");
     return ctx.result;
 }
 
