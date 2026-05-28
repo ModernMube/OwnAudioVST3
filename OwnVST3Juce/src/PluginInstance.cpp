@@ -161,7 +161,7 @@ PluginInstance::~PluginInstance()
 
 // Actual scan + instantiation logic, separated so the __try/__except wrapper
 // below does not share a scope with C++ objects that have non-trivial dtors.
-static bool loadPluginBody(PluginInstance* self, const char* path)
+bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
 {
     const juce::String pluginPath = juce::String::fromUTF8(path);
     juce::KnownPluginList pluginList;
