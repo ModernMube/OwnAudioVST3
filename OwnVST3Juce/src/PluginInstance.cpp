@@ -159,10 +159,36 @@ PluginInstance::~PluginInstance()
 
 /* ── Loading ─────────────────────────────────────────────────────────────── */
 
+// ---------------------------------------------------------------------------
+// Diagnostic file logger — writes timestamped lines to %TEMP%\ownvst3_load.log
+// so crash location can be determined without a debugger attached.
+// Compiled only on Windows; removed once the crash is identified.
+// ---------------------------------------------------------------------------
+#if defined(_WIN32)
+static void diagLog(const char* msg)
+{
+    char path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, path)) return;
+    strncat_s(path, "ownvst3_load.log", MAX_PATH - strlen(path) - 1);
+    FILE* f = nullptr;
+    fopen_s(&f, path, "a");
+    if (!f) return;
+    SYSTEMTIME t; GetLocalTime(&t);
+    fprintf(f, "[%02d:%02d:%02d.%03d] %s\n",
+            t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, msg);
+    fclose(f);
+}
+#else
+static inline void diagLog(const char*) {}
+#endif
+// ---------------------------------------------------------------------------
+
 // Actual scan + instantiation logic, separated so the __try/__except wrapper
 // below does not share a scope with C++ objects that have non-trivial dtors.
 bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
 {
+    diagLog("loadPluginBody: enter");
+
     const juce::String pluginPath = juce::String::fromUTF8(path);
     juce::KnownPluginList pluginList;
 
@@ -172,23 +198,32 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
         if (!fmt->fileMightContainThisPluginType(pluginPath))
             continue;
 
+        diagLog("loadPluginBody: scanAndAddFile start");
         juce::OwnedArray<juce::PluginDescription> found;
         pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
+        diagLog("loadPluginBody: scanAndAddFile done");
 
         if (!found.isEmpty())
         {
+            diagLog("loadPluginBody: createPluginInstance start");
             juce::String errorMsg;
             self->_plugin = self->_formatManager.createPluginInstance(
                 *found[0], self->_sampleRate, self->_blockSize, errorMsg);
+            diagLog("loadPluginBody: createPluginInstance done");
             break;
         }
     }
 
     if (!self->_plugin)
+    {
+        diagLog("loadPluginBody: plugin is null – returning false");
         return false;
+    }
 
+    diagLog("loadPluginBody: setPlayHead + buildParameterMap");
     self->_plugin->setPlayHead(&self->_playHead);
     self->buildParameterMap();
+    diagLog("loadPluginBody: success");
     return true;
 }
 
