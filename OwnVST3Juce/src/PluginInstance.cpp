@@ -67,6 +67,29 @@ static void initJuceOnce()
     // JUCE's DeletedAtShutdown list still holds, causing SIGABRT in deleteAll().
     // The OS reclaims all resources on process exit.
 #else
+#if defined(_WIN32)
+    // JUCE derives its Win32 window class name from the module HINSTANCE it
+    // receives via Process::getCurrentModuleInstanceHandle(), which defaults to
+    // GetModuleHandle(nullptr) — the host executable's HINSTANCE.  JUCE-based
+    // plugins (e.g. TDR Nova) compiled with their own JUCE copy do the same,
+    // producing an identical class name.  The second RegisterClassEx call gets
+    // ERROR_CLASS_ALREADY_EXISTS and the plugin ends up using the host's WndProc,
+    // leading to an immediate crash.
+    //
+    // Fix: point our JUCE at ownvst3.dll's own HINSTANCE so the host and each
+    // plugin get distinct class names and independent WndProcs.
+    {
+        HMODULE ownModule = nullptr;
+        if (GetModuleHandleExW(
+                GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                reinterpret_cast<LPCWSTR>(&initJuceOnce),
+                &ownModule) && ownModule != nullptr)
+        {
+            juce::Process::setCurrentModuleInstanceHandle(ownModule);
+        }
+    }
+#endif
     s_messageThread = std::make_unique<JuceMessageThread>();
     s_messageThread->startThread(juce::Thread::Priority::high);
     s_messageThread->waitUntilReady();
