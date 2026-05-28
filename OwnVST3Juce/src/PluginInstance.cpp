@@ -159,16 +159,49 @@ PluginInstance::~PluginInstance()
 
 /* ── Loading ─────────────────────────────────────────────────────────────── */
 
+// Actual scan + instantiation logic, separated so the __try/__except wrapper
+// below does not share a scope with C++ objects that have non-trivial dtors.
+static bool loadPluginBody(PluginInstance* self, const char* path)
+{
+    const juce::String pluginPath = juce::String::fromUTF8(path);
+    juce::KnownPluginList pluginList;
+
+    for (int i = 0; i < self->_formatManager.getNumFormats(); ++i)
+    {
+        auto* fmt = self->_formatManager.getFormat(i);
+        if (!fmt->fileMightContainThisPluginType(pluginPath))
+            continue;
+
+        juce::OwnedArray<juce::PluginDescription> found;
+        pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
+
+        if (!found.isEmpty())
+        {
+            juce::String errorMsg;
+            self->_plugin = self->_formatManager.createPluginInstance(
+                *found[0], self->_sampleRate, self->_blockSize, errorMsg);
+            break;
+        }
+    }
+
+    if (!self->_plugin)
+        return false;
+
+    self->_plugin->setPlayHead(&self->_playHead);
+    self->buildParameterMap();
+    return true;
+}
+
 bool PluginInstance::loadPlugin(const char* path)
 {
     if (!path || _disposed.load(std::memory_order_relaxed))
         return false;
 
-    // Both scanAndAddFile() and createPluginInstance() must run on the JUCE
-    // message thread.  JUCE-based plugins (e.g. TDR Nova) call initialiseJuce_GUI()
-    // internally when their DLL is first loaded; doing so on any other thread causes
-    // a window-class conflict with the host's own JUCE instance (same HINSTANCE,
-    // same class name) which leads to an immediate crash.
+    // Scan and instantiate on the JUCE message thread so that JUCE-based plugins
+    // that call initialiseJuce_GUI() during DLL load do so on the correct thread.
+    // An SEH guard inside the lambda prevents a misbehaving plugin from crashing
+    // the host process; instead loadPlugin() returns false and the caller can
+    // report a graceful error.
     struct Ctx { PluginInstance* self; const char* path; bool result; };
     Ctx ctx{ this, path, false };
 
@@ -176,34 +209,18 @@ bool PluginInstance::loadPlugin(const char* path)
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
-
-            const juce::String pluginPath = juce::String::fromUTF8(c.path);
-            juce::KnownPluginList pluginList;
-
-            for (int i = 0; i < c.self->_formatManager.getNumFormats(); ++i)
+#if defined(_WIN32)
+            __try
             {
-                auto* fmt = c.self->_formatManager.getFormat(i);
-                if (!fmt->fileMightContainThisPluginType(pluginPath))
-                    continue;
-
-                juce::OwnedArray<juce::PluginDescription> found;
-                pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
-
-                if (!found.isEmpty())
-                {
-                    juce::String errorMsg;
-                    c.self->_plugin = c.self->_formatManager.createPluginInstance(
-                        *found[0], c.self->_sampleRate, c.self->_blockSize, errorMsg);
-                    break;
-                }
+                c.result = loadPluginBody(c.self, c.path);
             }
-
-            if (!c.self->_plugin)
-                return nullptr;
-
-            c.self->_plugin->setPlayHead(&c.self->_playHead);
-            c.self->buildParameterMap();
-            c.result = true;
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                c.result = false;
+            }
+#else
+            c.result = loadPluginBody(c.self, c.path);
+#endif
             return nullptr;
         },
         &ctx);

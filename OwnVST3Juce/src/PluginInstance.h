@@ -119,6 +119,7 @@ private:
      * identifier that the C# side uses as "paramId".
      */
     void buildParameterMap();
+    static bool loadPluginBody(PluginInstance* self, const char* path);
 
     /* JUCE plugin management */
     juce::AudioPluginFormatManager              _formatManager;
