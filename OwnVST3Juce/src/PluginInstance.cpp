@@ -141,33 +141,51 @@ bool PluginInstance::loadPlugin(const char* path)
     if (!path || _disposed.load(std::memory_order_relaxed))
         return false;
 
-    const juce::String pluginPath = juce::String::fromUTF8(path);
-    juce::KnownPluginList pluginList;
+    // Both scanAndAddFile() and createPluginInstance() must run on the JUCE
+    // message thread.  JUCE-based plugins (e.g. TDR Nova) call initialiseJuce_GUI()
+    // internally when their DLL is first loaded; doing so on any other thread causes
+    // a window-class conflict with the host's own JUCE instance (same HINSTANCE,
+    // same class name) which leads to an immediate crash.
+    struct Ctx { PluginInstance* self; const char* path; bool result; };
+    Ctx ctx{ this, path, false };
 
-    for (int i = 0; i < _formatManager.getNumFormats(); ++i)
-    {
-        auto* fmt = _formatManager.getFormat(i);
-        if (!fmt->fileMightContainThisPluginType(pluginPath))
-            continue;
-
-        juce::OwnedArray<juce::PluginDescription> found;
-        pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
-
-        if (!found.isEmpty())
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
+        [](void* raw) -> void*
         {
-            juce::String errorMsg;
-            _plugin = _formatManager.createPluginInstance(
-                *found[0], _sampleRate, _blockSize, errorMsg);
-            break;
-        }
-    }
+            auto& c = *static_cast<Ctx*>(raw);
 
-    if (!_plugin)
-        return false;
+            const juce::String pluginPath = juce::String::fromUTF8(c.path);
+            juce::KnownPluginList pluginList;
 
-    _plugin->setPlayHead(&_playHead);
-    buildParameterMap();
-    return true;
+            for (int i = 0; i < c.self->_formatManager.getNumFormats(); ++i)
+            {
+                auto* fmt = c.self->_formatManager.getFormat(i);
+                if (!fmt->fileMightContainThisPluginType(pluginPath))
+                    continue;
+
+                juce::OwnedArray<juce::PluginDescription> found;
+                pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
+
+                if (!found.isEmpty())
+                {
+                    juce::String errorMsg;
+                    c.self->_plugin = c.self->_formatManager.createPluginInstance(
+                        *found[0], c.self->_sampleRate, c.self->_blockSize, errorMsg);
+                    break;
+                }
+            }
+
+            if (!c.self->_plugin)
+                return nullptr;
+
+            c.self->_plugin->setPlayHead(&c.self->_playHead);
+            c.self->buildParameterMap();
+            c.result = true;
+            return nullptr;
+        },
+        &ctx);
+
+    return ctx.result;
 }
 
 bool PluginInstance::initialize(double sampleRate, int blockSize)
