@@ -189,11 +189,6 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
 
     self->_plugin->setPlayHead(&self->_playHead);
     self->buildParameterMap();
-    // Cache hasEditor on the message thread — calling _plugin->hasEditor() from
-    // the plugin thread crashes JUCE-based plugins (e.g. TDR Nova) because
-    // VST3PluginInstance::hasEditor() internally calls IEditController::createView(),
-    // which those plugins expect to run on the JUCE message thread.
-    self->_hasEditor = self->_plugin->hasEditor();
     return true;
 }
 
@@ -202,11 +197,16 @@ bool PluginInstance::loadPlugin(const char* path)
     if (!path || _disposed.load(std::memory_order_relaxed))
         return false;
 
-    // Scan and instantiate on the JUCE message thread so that JUCE-based plugins
-    // that call initialiseJuce_GUI() during DLL load do so on the correct thread.
-    // An SEH guard inside the lambda prevents a misbehaving plugin from crashing
-    // the host process; instead loadPlugin() returns false and the caller can
-    // report a graceful error.
+#if defined(_WIN32)
+    // Windows: run entirely on the JUCE message thread.
+    // JUCE-based plugins (e.g. TDR Nova) register a Win32 window class via
+    // RegisterClassEx during DLL load.  Both the host JUCE and the plugin JUCE
+    // derive the class name from their HINSTANCE; if both use the same HINSTANCE
+    // the second RegisterClassEx returns ERROR_CLASS_ALREADY_EXISTS and the plugin
+    // ends up with the host's WndProc — causing an immediate crash.
+    // Running on the JUCE message thread ensures the host JUCE infrastructure is
+    // already up and the plugin shares the existing message loop safely.
+    // The SEH guard catches access violations from misbehaving plugin DllMains.
     struct Ctx { PluginInstance* self; const char* path; bool result; };
     Ctx ctx{ this, path, false };
 
@@ -214,7 +214,6 @@ bool PluginInstance::loadPlugin(const char* path)
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
-#if defined(_WIN32)
             __try
             {
                 c.result = loadPluginBody(c.self, c.path);
@@ -223,14 +222,38 @@ bool PluginInstance::loadPlugin(const char* path)
             {
                 c.result = false;
             }
-#else
-            c.result = loadPluginBody(c.self, c.path);
-#endif
+            // hasEditor() calls IEditController::createView() internally; must run
+            // on the JUCE message thread — already satisfied here on Windows.
+            if (c.result && c.self->_plugin)
+                c.self->_hasEditor = c.self->_plugin->hasEditor();
             return nullptr;
         },
         &ctx);
 
     return ctx.result;
+#else
+    // macOS / Linux: run scan + instantiation on the calling thread.
+    // There is no Win32 RegisterClassEx conflict on these platforms.
+    // Running createPluginInstance on the JUCE message thread (= macOS main thread)
+    // while prepareToPlay, processBlock, and state calls run on a different thread
+    // causes thread-affinity violations in Core Audio / Cocoa internals, producing
+    // distorted audio and incorrect state serialisation.
+    if (!loadPluginBody(this, path))
+        return false;
+
+    // hasEditor() / IEditController::createView() must run on the JUCE message
+    // thread (= main thread on macOS, JuceMessageThread on Linux).
+    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
+        [](void* raw) -> void*
+        {
+            auto* self = static_cast<PluginInstance*>(raw);
+            if (self->_plugin)
+                self->_hasEditor = self->_plugin->hasEditor();
+            return nullptr;
+        },
+        this);
+    return true;
+#endif
 }
 
 bool PluginInstance::initialize(double sampleRate, int blockSize)
