@@ -159,36 +159,10 @@ PluginInstance::~PluginInstance()
 
 /* ── Loading ─────────────────────────────────────────────────────────────── */
 
-// ---------------------------------------------------------------------------
-// Diagnostic file logger — writes timestamped lines to %TEMP%\ownvst3_load.log
-// so crash location can be determined without a debugger attached.
-// Compiled only on Windows; removed once the crash is identified.
-// ---------------------------------------------------------------------------
-#if defined(_WIN32)
-static void diagLog(const char* msg)
-{
-    char path[MAX_PATH];
-    if (!GetTempPathA(MAX_PATH, path)) return;
-    strncat_s(path, "ownvst3_load.log", MAX_PATH - strlen(path) - 1);
-    FILE* f = nullptr;
-    fopen_s(&f, path, "a");
-    if (!f) return;
-    SYSTEMTIME t; GetLocalTime(&t);
-    fprintf(f, "[%02d:%02d:%02d.%03d] %s\n",
-            t.wHour, t.wMinute, t.wSecond, t.wMilliseconds, msg);
-    fclose(f);
-}
-#else
-static inline void diagLog(const char*) {}
-#endif
-// ---------------------------------------------------------------------------
-
 // Actual scan + instantiation logic, separated so the __try/__except wrapper
 // below does not share a scope with C++ objects that have non-trivial dtors.
 bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
 {
-    diagLog("loadPluginBody: enter");
-
     const juce::String pluginPath = juce::String::fromUTF8(path);
     juce::KnownPluginList pluginList;
 
@@ -198,29 +172,21 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
         if (!fmt->fileMightContainThisPluginType(pluginPath))
             continue;
 
-        diagLog("loadPluginBody: scanAndAddFile start");
         juce::OwnedArray<juce::PluginDescription> found;
         pluginList.scanAndAddFile(pluginPath, false, found, *fmt);
-        diagLog("loadPluginBody: scanAndAddFile done");
 
         if (!found.isEmpty())
         {
-            diagLog("loadPluginBody: createPluginInstance start");
             juce::String errorMsg;
             self->_plugin = self->_formatManager.createPluginInstance(
                 *found[0], self->_sampleRate, self->_blockSize, errorMsg);
-            diagLog("loadPluginBody: createPluginInstance done");
             break;
         }
     }
 
     if (!self->_plugin)
-    {
-        diagLog("loadPluginBody: plugin is null – returning false");
         return false;
-    }
 
-    diagLog("loadPluginBody: setPlayHead + buildParameterMap");
     self->_plugin->setPlayHead(&self->_playHead);
     self->buildParameterMap();
     // Cache hasEditor on the message thread — calling _plugin->hasEditor() from
@@ -228,7 +194,6 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
     // VST3PluginInstance::hasEditor() internally calls IEditController::createView(),
     // which those plugins expect to run on the JUCE message thread.
     self->_hasEditor = self->_plugin->hasEditor();
-    diagLog("loadPluginBody: success");
     return true;
 }
 
@@ -270,15 +235,12 @@ bool PluginInstance::loadPlugin(const char* path)
 
 bool PluginInstance::initialize(double sampleRate, int blockSize)
 {
-    diagLog("initialize: enter");
-    if (!_plugin) { diagLog("initialize: no plugin"); return false; }
+    if (!_plugin) return false;
 
     _sampleRate = sampleRate;
     _blockSize  = blockSize;
 
-    diagLog("initialize: prepareToPlay start");
     _plugin->prepareToPlay(sampleRate, blockSize);
-    diagLog("initialize: prepareToPlay done");
 
     const int channels = std::max(
         _plugin->getTotalNumInputChannels(),
@@ -288,7 +250,6 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
     _juceBuffer.setSize(std::max(channels, 1), blockSize, false, true, false);
     _midiBuffer.ensureSize(static_cast<size_t>(blockSize));
 
-    diagLog("initialize: success");
     return true;
 }
 
@@ -296,7 +257,6 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
 
 void PluginInstance::buildParameterMap()
 {
-    diagLog("buildParameterMap: start");
     _paramPtrs.clear();
     _indexToParamId.clear();
     _paramIdToIndex.clear();
@@ -315,45 +275,34 @@ void PluginInstance::buildParameterMap()
         _indexToParamId[static_cast<size_t>(i)] = i;
         _paramIdToIndex[i]                      = i;
     }
-    diagLog("buildParameterMap: done");
 }
 
 /* ── Metadata ────────────────────────────────────────────────────────────── */
 
 const char* PluginInstance::getName()
 {
-    diagLog("getName: start");
     if (!_plugin) return "";
-    auto r = _strings.store("name", _plugin->getName().toStdString());
-    diagLog("getName: done");
-    return r;
+    return _strings.store("name", _plugin->getName().toStdString());
 }
 
 const char* PluginInstance::getVendor()
 {
-    diagLog("getVendor: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
-    auto r = _strings.store("vendor", desc.manufacturerName.toStdString());
-    diagLog("getVendor: done");
-    return r;
+    return _strings.store("vendor", desc.manufacturerName.toStdString());
 }
 
 const char* PluginInstance::getVersion()
 {
-    diagLog("getVersion: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
-    auto r = _strings.store("version", desc.version.toStdString());
-    diagLog("getVersion: done");
-    return r;
+    return _strings.store("version", desc.version.toStdString());
 }
 
 const char* PluginInstance::getPluginInfo()
 {
-    diagLog("getPluginInfo: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
@@ -361,40 +310,29 @@ const char* PluginInstance::getPluginInfo()
         _plugin->getName().toStdString() + " | " +
         desc.manufacturerName.toStdString()  + " | " +
         desc.version.toStdString();
-    auto r = _strings.store("info", info);
-    diagLog("getPluginInfo: done");
-    return r;
+    return _strings.store("info", info);
 }
 
 bool PluginInstance::isInstrument() const
 {
-    diagLog("isInstrument: start");
     if (!_plugin) return false;
-    auto r = _plugin->acceptsMidi()
+    return _plugin->acceptsMidi()
         && _plugin->getTotalNumInputChannels()  == 0
         && _plugin->getTotalNumOutputChannels()  > 0;
-    diagLog("isInstrument: done");
-    return r;
 }
 
 bool PluginInstance::isEffect() const
 {
-    diagLog("isEffect: start");
     if (!_plugin) return false;
-    auto r = _plugin->getTotalNumInputChannels()  > 0
+    return _plugin->getTotalNumInputChannels()  > 0
         && _plugin->getTotalNumOutputChannels() > 0;
-    diagLog("isEffect: done");
-    return r;
 }
 
 bool PluginInstance::isMidiOnly() const
 {
-    diagLog("isMidiOnly: start");
     if (!_plugin) return false;
-    auto r = _plugin->acceptsMidi()
+    return _plugin->acceptsMidi()
         && _plugin->getTotalNumOutputChannels() == 0;
-    diagLog("isMidiOnly: done");
-    return r;
 }
 
 int PluginInstance::getActualInputChannels() const
@@ -411,7 +349,6 @@ int PluginInstance::getActualOutputChannels() const
 
 int PluginInstance::getParameterCount() const
 {
-    diagLog("getParameterCount");
     return static_cast<int>(_paramPtrs.size());
 }
 
@@ -578,10 +515,9 @@ void PluginInstance::resetTransportPosition()
 
 bool PluginInstance::createEditor(void* ownerWindowHandle)
 {
-    diagLog("createEditor: enter");
     if (_disposed.load(std::memory_order_relaxed)) return false;
-    if (!_plugin || !_plugin->hasEditor())          { diagLog("createEditor: no editor"); return false; }
-    if (_editorWindow)                              return true;
+    if (!_plugin || !_hasEditor)                   return false;
+    if (_editorWindow)                             return true;
 
     struct Ctx { PluginInstance* self; void* owner; bool result; };
     Ctx ctx{ this, ownerWindowHandle, false };
@@ -590,10 +526,8 @@ bool PluginInstance::createEditor(void* ownerWindowHandle)
         [](void* raw) -> void*
         {
             auto& c = *static_cast<Ctx*>(raw);
-            diagLog("createEditor: createEditorIfNeeded start");
             auto* editor = c.self->_plugin->createEditorIfNeeded();
-            diagLog("createEditor: createEditorIfNeeded done");
-            if (!editor) { diagLog("createEditor: editor is null"); return nullptr; }
+            if (!editor) return nullptr;
 
             c.self->_editorWindow = std::make_unique<EditorWindow>(
                 editor,
@@ -611,13 +545,11 @@ bool PluginInstance::createEditor(void* ownerWindowHandle)
                                        reinterpret_cast<LONG_PTR>(c.owner));
             }
 #endif
-            diagLog("createEditor: EditorWindow created");
             c.result = true;
             return nullptr;
         },
         &ctx);
 
-    diagLog(ctx.result ? "createEditor: success" : "createEditor: failed");
     return ctx.result;
 }
 
