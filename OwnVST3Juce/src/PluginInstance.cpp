@@ -223,6 +223,11 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
     diagLog("loadPluginBody: setPlayHead + buildParameterMap");
     self->_plugin->setPlayHead(&self->_playHead);
     self->buildParameterMap();
+    // Cache hasEditor on the message thread — calling _plugin->hasEditor() from
+    // the plugin thread crashes JUCE-based plugins (e.g. TDR Nova) because
+    // VST3PluginInstance::hasEditor() internally calls IEditController::createView(),
+    // which those plugins expect to run on the JUCE message thread.
+    self->_hasEditor = self->_plugin->hasEditor();
     diagLog("loadPluginBody: success");
     return true;
 }
@@ -649,10 +654,7 @@ void PluginInstance::resizeEditor(int width, int height)
 
 bool PluginInstance::hasEditor() const
 {
-    diagLog("hasEditor: start");
-    auto r = _plugin && _plugin->hasEditor();
-    diagLog("hasEditor: done");
-    return r;
+    return _hasEditor;
 }
 
 bool PluginInstance::getEditorSize(int& width, int& height)

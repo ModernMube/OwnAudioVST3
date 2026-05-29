@@ -148,6 +148,9 @@ private:
     /* Shared string storage for pointers returned across the P/Invoke boundary */
     StringCache _strings;
 
+    /* Cached on the JUCE message thread during loadPlugin(); read from any thread. */
+    bool _hasEditor { false };
+
     /* Lifecycle */
     std::atomic<bool> _disposed { false };
 
