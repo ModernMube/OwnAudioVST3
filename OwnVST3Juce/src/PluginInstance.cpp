@@ -423,6 +423,19 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
     const int channels  = std::min({ numIn, numOut, pluginIn, pluginOut,
                                      _juceBuffer.getNumChannels() });
 
+    // Clamp _juceBuffer to exactly numSamples without heap allocation.
+    // _juceBuffer was pre-allocated for maxBlockSize in initialize(), but the host
+    // may send smaller blocks (e.g. maxBlockSize=4096, actual=1024). Without this,
+    // processBlock sees the full 4096-sample buffer: the tail [numSamples..maxBlockSize-1]
+    // contains leftover output from the previous call (not real input), which drives
+    // filter state and delay lines to near-zero. On the next block the DSP restarts
+    // from wrong state, causing a discontinuity every block (~43 Hz) that sounds like
+    // buzzing or distortion — only audible after parameters activate the DSP.
+    _juceBuffer.setSize(_juceBuffer.getNumChannels(), numSamples,
+                        /*keepExistingContent=*/false,
+                        /*clearExtraSpace=*/false,
+                        /*avoidReallocating=*/true);
+
     // Copy C#-pinned input into the pre-allocated JUCE buffer.
     for (int ch = 0; ch < channels; ++ch)
     {
