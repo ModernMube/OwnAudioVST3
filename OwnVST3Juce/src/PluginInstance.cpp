@@ -291,6 +291,7 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
 
 void PluginInstance::buildParameterMap()
 {
+    diagLog("buildParameterMap: start");
     _paramPtrs.clear();
     _indexToParamId.clear();
     _paramIdToIndex.clear();
@@ -309,34 +310,45 @@ void PluginInstance::buildParameterMap()
         _indexToParamId[static_cast<size_t>(i)] = i;
         _paramIdToIndex[i]                      = i;
     }
+    diagLog("buildParameterMap: done");
 }
 
 /* ── Metadata ────────────────────────────────────────────────────────────── */
 
 const char* PluginInstance::getName()
 {
+    diagLog("getName: start");
     if (!_plugin) return "";
-    return _strings.store("name", _plugin->getName().toStdString());
+    auto r = _strings.store("name", _plugin->getName().toStdString());
+    diagLog("getName: done");
+    return r;
 }
 
 const char* PluginInstance::getVendor()
 {
+    diagLog("getVendor: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
-    return _strings.store("vendor", desc.manufacturerName.toStdString());
+    auto r = _strings.store("vendor", desc.manufacturerName.toStdString());
+    diagLog("getVendor: done");
+    return r;
 }
 
 const char* PluginInstance::getVersion()
 {
+    diagLog("getVersion: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
-    return _strings.store("version", desc.version.toStdString());
+    auto r = _strings.store("version", desc.version.toStdString());
+    diagLog("getVersion: done");
+    return r;
 }
 
 const char* PluginInstance::getPluginInfo()
 {
+    diagLog("getPluginInfo: start");
     if (!_plugin) return "";
     juce::PluginDescription desc;
     _plugin->fillInPluginDescription(desc);
@@ -344,29 +356,40 @@ const char* PluginInstance::getPluginInfo()
         _plugin->getName().toStdString() + " | " +
         desc.manufacturerName.toStdString()  + " | " +
         desc.version.toStdString();
-    return _strings.store("info", info);
+    auto r = _strings.store("info", info);
+    diagLog("getPluginInfo: done");
+    return r;
 }
 
 bool PluginInstance::isInstrument() const
 {
+    diagLog("isInstrument: start");
     if (!_plugin) return false;
-    return _plugin->acceptsMidi()
+    auto r = _plugin->acceptsMidi()
         && _plugin->getTotalNumInputChannels()  == 0
         && _plugin->getTotalNumOutputChannels()  > 0;
+    diagLog("isInstrument: done");
+    return r;
 }
 
 bool PluginInstance::isEffect() const
 {
+    diagLog("isEffect: start");
     if (!_plugin) return false;
-    return _plugin->getTotalNumInputChannels()  > 0
+    auto r = _plugin->getTotalNumInputChannels()  > 0
         && _plugin->getTotalNumOutputChannels() > 0;
+    diagLog("isEffect: done");
+    return r;
 }
 
 bool PluginInstance::isMidiOnly() const
 {
+    diagLog("isMidiOnly: start");
     if (!_plugin) return false;
-    return _plugin->acceptsMidi()
+    auto r = _plugin->acceptsMidi()
         && _plugin->getTotalNumOutputChannels() == 0;
+    diagLog("isMidiOnly: done");
+    return r;
 }
 
 int PluginInstance::getActualInputChannels() const
@@ -383,6 +406,7 @@ int PluginInstance::getActualOutputChannels() const
 
 int PluginInstance::getParameterCount() const
 {
+    diagLog("getParameterCount");
     return static_cast<int>(_paramPtrs.size());
 }
 
@@ -625,7 +649,10 @@ void PluginInstance::resizeEditor(int width, int height)
 
 bool PluginInstance::hasEditor() const
 {
-    return _plugin && _plugin->hasEditor();
+    diagLog("hasEditor: start");
+    auto r = _plugin && _plugin->hasEditor();
+    diagLog("hasEditor: done");
+    return r;
 }
 
 bool PluginInstance::getEditorSize(int& width, int& height)
