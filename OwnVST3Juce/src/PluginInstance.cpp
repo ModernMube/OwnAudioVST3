@@ -233,25 +233,21 @@ bool PluginInstance::loadPlugin(const char* path)
     return ctx.result;
 #else
     // macOS / Linux: run scan + instantiation on the calling thread.
-    // There is no Win32 RegisterClassEx conflict on these platforms.
-    // Running createPluginInstance on the JUCE message thread (= macOS main thread)
-    // while prepareToPlay, processBlock, and state calls run on a different thread
-    // causes thread-affinity violations in Core Audio / Cocoa internals, producing
-    // distorted audio and incorrect state serialisation.
+    // callFunctionOnMessageThread is intentionally NOT used here:
+    //   - On macOS the JUCE message thread is the Avalonia UI thread.  Dispatching
+    //     from the plugin thread via dispatch_sync(main_queue) while the UI thread
+    //     is suspended in an async/await continuation is not guaranteed to be
+    //     serviced, risking a deadlock that corrupts subsequent plugin state.
+    //   - On Linux the JuceMessageThread is always running, but calling
+    //     loadPluginBody or hasEditor() from it while prepareToPlay/processBlock
+    //     run on other threads causes the same thread-affinity distortion as macOS.
+    // Both operations run on the calling (plugin) thread, matching the threading
+    // model that was in place before the Windows-specific changes were introduced.
     if (!loadPluginBody(this, path))
         return false;
 
-    // hasEditor() / IEditController::createView() must run on the JUCE message
-    // thread (= main thread on macOS, JuceMessageThread on Linux).
-    juce::MessageManager::getInstance()->callFunctionOnMessageThread(
-        [](void* raw) -> void*
-        {
-            auto* self = static_cast<PluginInstance*>(raw);
-            if (self->_plugin)
-                self->_hasEditor = self->_plugin->hasEditor();
-            return nullptr;
-        },
-        this);
+    if (_plugin)
+        _hasEditor = _plugin->hasEditor();
     return true;
 #endif
 }
