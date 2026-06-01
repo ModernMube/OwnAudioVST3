@@ -6,7 +6,6 @@
 
 A thread-safe, cross-platform C# library for hosting VST3 plugins. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is powered by [JUCE](https://juce.com/), providing broad plugin compatibility across all supported platforms.
 
-[![Build](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml/badge.svg)](https://github.com/ModernMube/OwnVST3Sharp/actions/workflows/build.yml)
 [![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnVst3Host/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
