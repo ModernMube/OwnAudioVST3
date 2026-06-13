@@ -233,21 +233,41 @@ bool PluginInstance::loadPlugin(const char* path)
     return ctx.result;
 #else
     // macOS / Linux: run scan + instantiation on the calling thread.
-    // callFunctionOnMessageThread is intentionally NOT used here:
-    //   - On macOS the JUCE message thread is the Avalonia UI thread.  Dispatching
-    //     from the plugin thread via dispatch_sync(main_queue) while the UI thread
-    //     is suspended in an async/await continuation is not guaranteed to be
-    //     serviced, risking a deadlock that corrupts subsequent plugin state.
-    //   - On Linux the JuceMessageThread is always running, but calling
-    //     loadPluginBody or hasEditor() from it while prepareToPlay/processBlock
-    //     run on other threads causes the same thread-affinity distortion as macOS.
-    // Both operations run on the calling (plugin) thread, matching the threading
-    // model that was in place before the Windows-specific changes were introduced.
+    // callFunctionOnMessageThread is intentionally NOT used for loadPluginBody:
+    //   - On macOS the JUCE message thread is the Avalonia UI thread.  Blocking
+    //     the message thread for the full scan + instantiation duration degrades
+    //     UI responsiveness and risks deadlock if the host awaits the result from
+    //     the same thread.
+    //   - On Linux the JuceMessageThread is always running, but loadPluginBody
+    //     must not run there to avoid thread-affinity distortion with processBlock.
     if (!loadPluginBody(this, path))
         return false;
 
     if (_plugin)
+    {
+#if defined(__APPLE__)
+        // hasEditor() calls IEditController::createView() + releaseView() internally
+        // to probe whether the plugin provides an editor.  IK Multimedia products
+        // (and other JUCE-based VST3 plugins) register and unregister CFRunLoop
+        // Source0 callbacks during this sequence.  If hasEditor() runs on a
+        // background thread, the AppKit RunLoop on the main thread can service those
+        // Source0 callbacks while the plugin's internal editor object is mid-teardown,
+        // calling a pure virtual function on a partially-freed vtable and crashing
+        // with SIGABRT (__cxa_pure_virtual).
+        // Fix: dispatch hasEditor() to the JUCE message thread (= NSApplication main
+        // thread on macOS), matching the Windows path above.
+        juce::MessageManager::getInstance()->callFunctionOnMessageThread(
+            [](void* raw) -> void*
+            {
+                auto* self = static_cast<PluginInstance*>(raw);
+                self->_hasEditor = self->_plugin->hasEditor();
+                return nullptr;
+            },
+            this);
+#else
         _hasEditor = _plugin->hasEditor();
+#endif
+    }
     return true;
 #endif
 }
