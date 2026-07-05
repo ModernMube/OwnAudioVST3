@@ -87,6 +87,16 @@ public:
     void setTransportState(bool playing);
     void resetTransportPosition();
 
+    /* ── Bypass ──────────────────────────────────────────────────────────── */
+
+    /**
+     * Enables or disables plugin bypass. When bypassed, processAudio() calls
+     * JUCE's processBlockBypassed(), which passes the input through delayed by the
+     * plugin's own reported latency — so toggling bypass introduces no time shift
+     * relative to the active (processed) output. Safe to call from any thread.
+     */
+    void setBypass(bool bypassed);
+
     /* ── Editor (UI thread) ──────────────────────────────────────────────── */
 
     bool createEditor(void* ownerWindowHandle);
@@ -141,6 +151,12 @@ private:
     std::atomic<double>   _bpm       { 120.0 };
     std::atomic<bool>     _playing   { false  };
     std::atomic<int64_t>  _samplePos { 0      };
+
+    /* Bypass flag – written from any thread, read on the audio thread. A plain
+       atomic (not the SPSC queue) is enough: a bypass toggle carries no ordering
+       relationship with parameter changes and only needs to be visible on the
+       next block. */
+    std::atomic<bool>     _bypassed  { false  };
 
     /* Lock-free queue: UI thread enqueues, audio thread drains */
     SpscQueue<StateChange, 512> _stateQueue;

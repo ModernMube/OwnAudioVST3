@@ -168,6 +168,12 @@ OWNVST3_API void VST3Plugin_ResetTransportPosition(VST3PluginHandle handle)
         static_cast<PluginInstance*>(handle)->resetTransportPosition();
 }
 
+OWNVST3_API void VST3Plugin_SetBypass(VST3PluginHandle handle, bool bypassed)
+{
+    if (handle)
+        static_cast<PluginInstance*>(handle)->setBypass(bypassed);
+}
+
 /* ── Editor ─────────────────────────────────────────────────────────────────── */
 
 OWNVST3_API bool VST3Plugin_HasEditor(VST3PluginHandle handle)

@@ -263,6 +263,14 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — ResetTransportPosition dropped.");
     }
 
+    /// <summary>
+    /// Enables or disables plugin bypass. Forwarded straight to the native host (a thread-safe atomic
+    /// flag read on the audio thread), not through this wrapper's managed state queue — so it applies
+    /// even when a native audio host (for example the Rust effect chain) drives ProcessAudio directly
+    /// and this wrapper's queue is never drained.
+    /// </summary>
+    public void SetBypass(bool bypassed) => _inner.SetBypass(bypassed);
+
     #region Audio-thread direct calls (zero-overhead after first block).
 
     /// <summary>

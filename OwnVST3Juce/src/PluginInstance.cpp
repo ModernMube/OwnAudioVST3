@@ -469,7 +469,14 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
     for (int ch = channels; ch < _juceBuffer.getNumChannels(); ++ch)
         _juceBuffer.clear(ch, 0, numSamples);
 
-    _plugin->processBlock(_juceBuffer, _midiBuffer);
+    // When bypassed, JUCE's processBlockBypassed() passes the input through
+    // delayed by the plugin's own latency, so toggling bypass never shifts the
+    // output in time relative to the processed (active) path. The plugin is still
+    // driven every block, so it never goes cold.
+    if (_bypassed.load(std::memory_order_relaxed))
+        _plugin->processBlockBypassed(_juceBuffer, _midiBuffer);
+    else
+        _plugin->processBlock(_juceBuffer, _midiBuffer);
 
     // Copy processed output back to the C# buffers.
     for (int ch = 0; ch < channels; ++ch)
@@ -561,6 +568,13 @@ void PluginInstance::resetTransportPosition()
 {
     StateChange c{ StateChangeKind::ResetTransport, 0, 0.0 };
     _stateQueue.tryEnqueue(c);
+}
+
+void PluginInstance::setBypass(bool bypassed)
+{
+    // A plain atomic store — the audio thread reads it at the top of the next
+    // processAudio() block. No SPSC round-trip is needed for a bypass toggle.
+    _bypassed.store(bypassed, std::memory_order_relaxed);
 }
 
 /* ── Editor (UI / message thread) ───────────────────────────────────────── */

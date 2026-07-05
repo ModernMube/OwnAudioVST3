@@ -404,6 +404,19 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Enables or disables plugin bypass. When bypassed, the plugin is still driven every block
+        /// (so it never goes cold) but runs through JUCE's processBlockBypassed(), which passes the
+        /// input through delayed by the plugin's own latency — so toggling bypass introduces no time
+        /// shift relative to the processed output. Safe to call from any thread; applied on the next
+        /// audio block.
+        /// </summary>
+        public void SetBypass(bool bypassed)
+        {
+            CheckDisposed();
+            _setBypassFunc?.Invoke(_pluginHandle, bypassed);
+        }
+
+        /// <summary>
         /// Resets the transport sample position counter (e.g. on Stop)
         /// </summary>
         public void ResetTransportPosition()

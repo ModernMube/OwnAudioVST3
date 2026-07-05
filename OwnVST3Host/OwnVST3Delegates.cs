@@ -38,6 +38,7 @@ namespace OwnVST3Host
         private delegate int VST3Plugin_GetActualOutputChannelsDelegate(IntPtr handle);
         private delegate void VST3Plugin_SetTempoDelegate(IntPtr handle, double bpm);
         private delegate void VST3Plugin_SetTransportStateDelegate(IntPtr handle, bool isPlaying);
+        private delegate void VST3Plugin_SetBypassDelegate(IntPtr handle, bool bypassed);
         private delegate void VST3Plugin_ResetTransportPositionDelegate(IntPtr handle);
         private delegate bool VST3Plugin_GetStateDelegate(IntPtr handle, out IntPtr outData, out int outLength);
         private delegate bool VST3Plugin_SetStateDelegate(IntPtr handle, IntPtr data, int length);
@@ -78,6 +79,7 @@ namespace OwnVST3Host
             _getActualOutputChannelsFunc = TryGetDelegate<VST3Plugin_GetActualOutputChannelsDelegate>("VST3Plugin_GetActualOutputChannels");
             _setTempoFunc = TryGetDelegate<VST3Plugin_SetTempoDelegate>("VST3Plugin_SetTempo");
             _setTransportStateFunc = TryGetDelegate<VST3Plugin_SetTransportStateDelegate>("VST3Plugin_SetTransportState");
+            _setBypassFunc = TryGetDelegate<VST3Plugin_SetBypassDelegate>("VST3Plugin_SetBypass");
             _resetTransportPositionFunc = TryGetDelegate<VST3Plugin_ResetTransportPositionDelegate>("VST3Plugin_ResetTransportPosition");
             _getStateFunc = TryGetDelegate<VST3Plugin_GetStateDelegate>("VST3Plugin_GetState");
             _setStateFunc = TryGetDelegate<VST3Plugin_SetStateDelegate>("VST3Plugin_SetState");

@@ -184,6 +184,18 @@ OWNVST3_API void VST3Plugin_SetTransportState(VST3PluginHandle handle, bool isPl
 /** Resets the internal sample-position counter to zero.  Safe to call from any thread. */
 OWNVST3_API void VST3Plugin_ResetTransportPosition(VST3PluginHandle handle);
 
+/**
+ * Enables or disables plugin bypass.  Safe to call from any thread.
+ *
+ * When bypassed, the plugin is still driven every block (so it never goes cold),
+ * but processing runs through JUCE's processBlockBypassed(), which passes the
+ * input through delayed by the plugin's own reported latency.  Toggling bypass
+ * therefore introduces no time shift relative to the processed output — unlike a
+ * host-side dry/wet switch, whose zero-latency dry path would jump in time
+ * against the latency-delayed wet path.
+ */
+OWNVST3_API void VST3Plugin_SetBypass(VST3PluginHandle handle, bool bypassed);
+
 /* ── Editor window ─────────────────────────────────────────────────────────── */
 
 /**
