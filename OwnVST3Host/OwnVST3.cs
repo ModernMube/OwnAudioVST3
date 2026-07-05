@@ -49,6 +49,7 @@ namespace OwnVST3Host
         private VST3Plugin_IsEditorOpenDelegate? _isEditorOpenFunc;
         private VST3Plugin_GetActualInputChannelsDelegate? _getActualInputChannelsFunc;
         private VST3Plugin_GetActualOutputChannelsDelegate? _getActualOutputChannelsFunc;
+        private VST3Plugin_GetLatencySamplesDelegate? _getLatencySamplesFunc;
         private VST3Plugin_SetTempoDelegate? _setTempoFunc;
         private VST3Plugin_SetTransportStateDelegate? _setTransportStateFunc;
         private VST3Plugin_SetBypassDelegate? _setBypassFunc;

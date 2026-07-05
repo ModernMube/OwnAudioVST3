@@ -137,6 +137,14 @@ OWNVST3_API int VST3Plugin_GetActualInputChannels(VST3PluginHandle handle);
 /** Returns the number of output channels negotiated with the plugin. */
 OWNVST3_API int VST3Plugin_GetActualOutputChannels(VST3PluginHandle handle);
 
+/**
+ * Returns the plugin's processing latency in samples (per channel), as reported
+ * after Initialize().  Zero before initialization or for a zero-latency plugin.
+ * A native audio host uses this to delay-compensate other tracks so a plugin's
+ * output stays sample-accurately aligned.
+ */
+OWNVST3_API int VST3Plugin_GetLatencySamples(VST3PluginHandle handle);
+
 /* ── Parameters ────────────────────────────────────────────────────────────── */
 
 /** Returns the total parameter count. */

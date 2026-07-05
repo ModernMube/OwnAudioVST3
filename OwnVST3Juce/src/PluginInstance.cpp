@@ -384,6 +384,13 @@ int PluginInstance::getActualOutputChannels() const
     return _plugin ? _plugin->getTotalNumOutputChannels() : 0;
 }
 
+int PluginInstance::getLatencySamples() const
+{
+    // The plugin reports its processing latency (per channel, in samples) after
+    // prepareToPlay(). Zero until initialized or for a zero-latency plugin.
+    return _plugin ? _plugin->getLatencySamples() : 0;
+}
+
 /* ── Parameters ──────────────────────────────────────────────────────────── */
 
 int PluginInstance::getParameterCount() const

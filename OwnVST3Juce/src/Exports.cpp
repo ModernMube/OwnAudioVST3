@@ -95,6 +95,12 @@ OWNVST3_API int VST3Plugin_GetActualOutputChannels(VST3PluginHandle handle)
     return static_cast<PluginInstance*>(handle)->getActualOutputChannels();
 }
 
+OWNVST3_API int VST3Plugin_GetLatencySamples(VST3PluginHandle handle)
+{
+    if (!handle) return 0;
+    return static_cast<PluginInstance*>(handle)->getLatencySamples();
+}
+
 /* ── Parameters ─────────────────────────────────────────────────────────────── */
 
 OWNVST3_API int VST3Plugin_GetParameterCount(VST3PluginHandle handle)

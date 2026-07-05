@@ -386,6 +386,20 @@ namespace OwnVST3Host
         }
 
         /// <summary>
+        /// Returns the plugin's processing latency in samples (per channel), reported after
+        /// Initialize(). Zero before initialization or for a zero-latency plugin. A native audio host
+        /// uses this to delay-compensate other tracks so the plugin's output stays sample-accurate.
+        /// </summary>
+        public int LatencySamples
+        {
+            get
+            {
+                CheckDisposed();
+                return _getLatencySamplesFunc?.Invoke(_pluginHandle) ?? 0;
+            }
+        }
+
+        /// <summary>
         /// Sets the playback tempo forwarded to the plugin via ProcessContext
         /// </summary>
         public void SetTempo(double bpm)

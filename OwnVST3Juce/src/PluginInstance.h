@@ -65,6 +65,7 @@ public:
     bool        isMidiOnly()    const;
     int         getActualInputChannels()  const;
     int         getActualOutputChannels() const;
+    int         getLatencySamples()       const;
 
     /* ── Parameters ──────────────────────────────────────────────────────── */
 
