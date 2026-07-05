@@ -338,6 +338,15 @@ namespace OwnVST3Host
     /// </summary>
     public IntPtr LibraryHandle => _libraryHandle;
 
+    /// <summary>
+    /// Opaque native plugin instance handle (the value returned by <c>VST3Plugin_Create</c>).
+    /// Exposed so a native audio host — for example the Rust effect chain in OwnAudioSharp —
+    /// can forward audio blocks straight to <c>VST3Plugin_ProcessAudio</c> on the audio thread
+    /// without routing them back through managed code. The handle stays valid until this wrapper
+    /// is disposed; callers must not use it afterwards.
+    /// </summary>
+    public IntPtr PluginHandle => _pluginHandle;
+
         #region macOS GCD drain-signal helpers
 
         private static readonly IntPtr s_macOsMainQueue = GetMacOsMainQueue();

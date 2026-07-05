@@ -113,6 +113,13 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     /// </summary>
     public IntPtr LibraryHandle => _inner.LibraryHandle;
 
+    /// <summary>
+    /// Opaque native plugin instance handle. Exposed so a native audio host (for example the
+    /// Rust effect chain in OwnAudioSharp) can forward audio directly to the plugin's
+    /// <c>VST3Plugin_ProcessAudio</c> entry point. Valid until this wrapper is disposed.
+    /// </summary>
+    public IntPtr PluginHandle => _inner.PluginHandle;
+
     public ThreadedVst3Wrapper(string? dllPath = null)
     {
         _inner = dllPath != null ? new OwnVst3Wrapper(dllPath) : new OwnVst3Wrapper();
