@@ -447,8 +447,14 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
 
     const int pluginIn  = _plugin->getTotalNumInputChannels();
     const int pluginOut = _plugin->getTotalNumOutputChannels();
-    const int channels  = std::min({ numIn, numOut, pluginIn, pluginOut,
-                                     _juceBuffer.getNumChannels() });
+    const int buffered  = _juceBuffer.getNumChannels();
+
+    // The two sides are counted apart, the same way initialize() sized the buffer to the
+    // wider bus. An instrument has no input bus at all, and folding both into one minimum
+    // made that a zero: processBlock still rendered, but nothing was copied back out and
+    // the silent input was passed over the top of it. Every instrument came back mute.
+    const int inChannels  = std::min({ numIn,  pluginIn,  buffered });
+    const int outChannels = std::min({ numOut, pluginOut, buffered });
 
     // Clamp _juceBuffer to exactly numSamples without heap allocation.
     // _juceBuffer was pre-allocated for maxBlockSize in initialize(), but the host
@@ -463,17 +469,18 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
                         /*clearExtraSpace=*/false,
                         /*avoidReallocating=*/true);
 
-    // Copy C#-pinned input into the pre-allocated JUCE buffer.
-    for (int ch = 0; ch < channels; ++ch)
+    // Copy C#-pinned input into the pre-allocated JUCE buffer. Whatever the plugin does
+    // not take input for is cleared, so an instrument starts every block from silence.
+    for (int ch = 0; ch < inChannels; ++ch)
     {
-        if (ch < numIn && inputs[ch])
+        if (inputs[ch])
             std::memcpy(_juceBuffer.getWritePointer(ch),
                         inputs[ch],
                         static_cast<size_t>(numSamples) * sizeof(float));
         else
             _juceBuffer.clear(ch, 0, numSamples);
     }
-    for (int ch = channels; ch < _juceBuffer.getNumChannels(); ++ch)
+    for (int ch = inChannels; ch < buffered; ++ch)
         _juceBuffer.clear(ch, 0, numSamples);
 
     // When bypassed, JUCE's processBlockBypassed() passes the input through
@@ -486,16 +493,16 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
         _plugin->processBlock(_juceBuffer, _midiBuffer);
 
     // Copy processed output back to the C# buffers.
-    for (int ch = 0; ch < channels; ++ch)
+    for (int ch = 0; ch < outChannels; ++ch)
     {
-        if (ch < numOut && outputs[ch])
+        if (outputs[ch])
             std::memcpy(outputs[ch],
                         _juceBuffer.getReadPointer(ch),
                         static_cast<size_t>(numSamples) * sizeof(float));
     }
 
     // Pass-through for channels beyond what the plugin processed.
-    for (int ch = channels; ch < std::min(numIn, numOut); ++ch)
+    for (int ch = outChannels; ch < std::min(numIn, numOut); ++ch)
     {
         if (inputs[ch] && outputs[ch])
             std::memcpy(outputs[ch], inputs[ch],

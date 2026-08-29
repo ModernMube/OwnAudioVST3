@@ -184,7 +184,10 @@ namespace OwnVST3Host
             int actualIn = ActualInputChannels;
             int actualOut = ActualOutputChannels;
 
-            int pluginChannels = Math.Min(numChannels, Math.Min(actualIn, actualOut));
+            // The wider of the two buses, the same way Initialize preallocated. An instrument
+            // has no input bus at all, and taking the narrower one made that a zero here - the
+            // plugin was never called and every block came back silent.
+            int pluginChannels = Math.Min(numChannels, Math.Max(actualIn, actualOut));
             pluginChannels = Math.Min(pluginChannels, _preallocChannels);
 
             if (pluginChannels <= 0)
