@@ -14,6 +14,16 @@ namespace OwnVST3Host
     }
 
     /// <summary>
+    /// Fast reads only what is free — the AudioComponent registry for AU, bundle
+    /// names for VST3 — and leaves channel counts unknown. Full loads every plugin.
+    /// </summary>
+    public enum ScanMode
+    {
+        Fast = 0,
+        Full = 1
+    }
+
+    /// <summary>
     /// One plugin found by <see cref="PluginScanner"/>.
     /// </summary>
     public sealed class PluginDescriptor
@@ -23,10 +33,7 @@ namespace OwnVST3Host
         public string Version { get; init; } = "";
         public string Category { get; init; } = "";
 
-        /// <summary>
-        /// Hand this to LoadPlugin as is — a bundle path for VST3, an
-        /// "AudioUnit:Effects/aufx,dely,appl" token for AU.
-        /// </summary>
+        /// <summary>A bundle path for VST3, an "AudioUnit:..." token for AU. Hand it to LoadPlugin as is.</summary>
         public string Identifier { get; init; } = "";
 
         public PluginFormat Format { get; init; }
@@ -35,14 +42,18 @@ namespace OwnVST3Host
         public string FilePath { get; init; } = "";
 
         public bool IsInstrument { get; init; }
-        public int InputChannels { get; init; }
-        public int OutputChannels { get; init; }
+
+        /// <summary>-1 until a full scan or <see cref="PluginScanner.ResolveAsync"/> fills it in.</summary>
+        public int InputChannels { get; init; } = -1;
+        public int OutputChannels { get; init; } = -1;
+
         public int UniqueId { get; init; }
+
+        public bool IsResolved => InputChannels >= 0;
 
         public override string ToString() => $"{Name} — {Vendor} ({Format})";
     }
 
-    /// <summary>Where a running scan is at.</summary>
     public readonly struct ScanProgress
     {
         public float Fraction { get; }
@@ -58,12 +69,9 @@ namespace OwnVST3Host
     }
 
     /// <summary>
-    /// Format-neutral plugin discovery, driven by the native side.
-    ///
-    /// AudioUnits have no directory to walk — they live in the AudioComponent
-    /// registry and are addressed by identifier — so OwnVst3Wrapper.FindVst3Plugins()
-    /// cannot see them. That method keeps working exactly as before; this is the
-    /// additional way in when you want AUs too.
+    /// Format-neutral plugin discovery. AudioUnits have no directory to walk, so
+    /// OwnVst3Wrapper.FindVst3Plugins() cannot see them — that method is unchanged,
+    /// this is the way in when you want AUs too.
     /// </summary>
     public static class PluginScanner
     {
@@ -88,7 +96,7 @@ namespace OwnVST3Host
 
         // I1 because the native side returns C99 _Bool, not a 4-byte Win32 BOOL.
         [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_ScanStartDelegate(int formatMask);
+        private delegate bool OwnPlugin_ScanStartModeDelegate(int formatMask, int mode);
 
         [return: MarshalAs(UnmanagedType.I1)]
         private delegate bool OwnPlugin_ScanIsRunningDelegate();
@@ -101,6 +109,9 @@ namespace OwnVST3Host
         [return: MarshalAs(UnmanagedType.I1)]
         private delegate bool OwnPlugin_GetScannedAtDelegate(int index, ref PluginDescriptorC descriptor);
 
+        [return: MarshalAs(UnmanagedType.I1)]
+        private delegate bool OwnPlugin_ResolveDescriptorDelegate([MarshalAs(UnmanagedType.LPUTF8Str)] string identifier, ref PluginDescriptorC descriptor);
+
         private delegate IntPtr OwnPlugin_GetScanCacheXmlDelegate();
 
         [return: MarshalAs(UnmanagedType.I1)]
@@ -110,13 +121,14 @@ namespace OwnVST3Host
         private static bool _loaded;
         private static IntPtr _libraryHandle;
 
-        private static OwnPlugin_ScanStartDelegate? _scanStartFunc;
+        private static OwnPlugin_ScanStartModeDelegate? _scanStartFunc;
         private static OwnPlugin_ScanIsRunningDelegate? _scanIsRunningFunc;
         private static OwnPlugin_ScanProgressDelegate? _scanProgressFunc;
         private static OwnPlugin_ScanCurrentItemDelegate? _scanCurrentItemFunc;
         private static OwnPlugin_ScanCancelDelegate? _scanCancelFunc;
         private static OwnPlugin_GetScannedCountDelegate? _getScannedCountFunc;
         private static OwnPlugin_GetScannedAtDelegate? _getScannedAtFunc;
+        private static OwnPlugin_ResolveDescriptorDelegate? _resolveFunc;
         private static OwnPlugin_GetScanCacheXmlDelegate? _getScanCacheXmlFunc;
         private static OwnPlugin_RestoreScanCacheXmlDelegate? _restoreScanCacheXmlFunc;
 
@@ -130,13 +142,14 @@ namespace OwnVST3Host
 
                 _libraryHandle = NativeLibrary.Load(OwnVst3Wrapper.GetNativeLibraryPath());
 
-                _scanStartFunc = _bind<OwnPlugin_ScanStartDelegate>("OwnPlugin_ScanStart");
+                _scanStartFunc = _bind<OwnPlugin_ScanStartModeDelegate>("OwnPlugin_ScanStartMode");
                 _scanIsRunningFunc = _bind<OwnPlugin_ScanIsRunningDelegate>("OwnPlugin_ScanIsRunning");
                 _scanProgressFunc = _bind<OwnPlugin_ScanProgressDelegate>("OwnPlugin_ScanProgress");
                 _scanCurrentItemFunc = _bind<OwnPlugin_ScanCurrentItemDelegate>("OwnPlugin_ScanCurrentItem");
                 _scanCancelFunc = _bind<OwnPlugin_ScanCancelDelegate>("OwnPlugin_ScanCancel");
                 _getScannedCountFunc = _bind<OwnPlugin_GetScannedCountDelegate>("OwnPlugin_GetScannedCount");
                 _getScannedAtFunc = _bind<OwnPlugin_GetScannedAtDelegate>("OwnPlugin_GetScannedAt");
+                _resolveFunc = _bind<OwnPlugin_ResolveDescriptorDelegate>("OwnPlugin_ResolveDescriptor");
                 _getScanCacheXmlFunc = _bind<OwnPlugin_GetScanCacheXmlDelegate>("OwnPlugin_GetScanCacheXml");
                 _restoreScanCacheXmlFunc = _bind<OwnPlugin_RestoreScanCacheXmlDelegate>("OwnPlugin_RestoreScanCacheXml");
 
@@ -157,9 +170,7 @@ namespace OwnVST3Host
 
         #region Public API
 
-        /// <summary>
-        /// False against a native library older than 1.7.0, which has no scanner exports.
-        /// </summary>
+        /// <summary>False against a native library older than 1.7.0.</summary>
         public static bool IsSupported
         {
             get
@@ -169,7 +180,6 @@ namespace OwnVST3Host
             }
         }
 
-        /// <summary>AU hosting only exists on macOS; everywhere else the mask is ignored.</summary>
         public static bool AudioUnitSupported => OperatingSystem.IsMacOS();
 
         public static bool IsScanning
@@ -181,7 +191,6 @@ namespace OwnVST3Host
             }
         }
 
-        /// <summary>Asks the native scan thread to stop after the plugin it is on.</summary>
         public static void Cancel()
         {
             _ensureLoaded();
@@ -189,12 +198,12 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Scans every requested format and returns what turned up. Slow — each plugin
-        /// gets instantiated once — so run it off the UI thread and cache the result
-        /// via <see cref="GetCacheXml"/>.
+        /// Lists installed plugins. Fast mode is near-instant and leaves channel counts
+        /// at -1; Full loads every plugin to fill them in and takes minutes.
         /// </summary>
         public static async Task<IReadOnlyList<PluginDescriptor>> ScanAsync(
             PluginFormat formats = PluginFormat.All,
+            ScanMode mode = ScanMode.Fast,
             IProgress<ScanProgress>? progress = null,
             CancellationToken cancellationToken = default)
         {
@@ -203,7 +212,7 @@ namespace OwnVST3Host
             if (_scanStartFunc == null)
                 throw new NotSupportedException("This native library predates 1.7.0 and has no plugin scanner.");
 
-            if (!_scanStartFunc((int)formats))
+            if (!_scanStartFunc((int)formats, (int)mode))
                 throw new InvalidOperationException("A plugin scan is already running.");
 
             using (cancellationToken.Register(Cancel))
@@ -221,7 +230,25 @@ namespace OwnVST3Host
             return GetResults();
         }
 
-        /// <summary>Name of the plugin being probed right now, or "" when idle.</summary>
+        /// <summary>
+        /// Loads one plugin to fill in what a fast scan left out, and updates the cached
+        /// entry. Takes as long as loading that plugin; returns null if it cannot be loaded.
+        /// </summary>
+        public static Task<PluginDescriptor?> ResolveAsync(PluginDescriptor plugin,
+                                                           CancellationToken cancellationToken = default)
+        {
+            _ensureLoaded();
+
+            if (_resolveFunc == null)
+                throw new NotSupportedException("This native library predates 1.7.0.");
+
+            return Task.Run(() =>
+            {
+                var raw = new PluginDescriptorC();
+                return _resolveFunc(plugin.Identifier, ref raw) ? _toDescriptor(ref raw) : null;
+            }, cancellationToken);
+        }
+
         public static string CurrentItem
         {
             get
@@ -231,10 +258,7 @@ namespace OwnVST3Host
             }
         }
 
-        /// <summary>
-        /// Everything found by the last scan (or restored from cache). Safe to call
-        /// while a scan is running — you get the partial list.
-        /// </summary>
+        /// <summary>Result of the last scan or cache restore. Safe to call mid-scan.</summary>
         public static IReadOnlyList<PluginDescriptor> GetResults()
         {
             _ensureLoaded();
@@ -252,10 +276,7 @@ namespace OwnVST3Host
             return found;
         }
 
-        /// <summary>
-        /// XML snapshot of the current result list. Persist it and feed it back through
-        /// <see cref="RestoreCache"/> on the next start to skip a full rescan.
-        /// </summary>
+        /// <summary>Persist this and feed it back to <see cref="RestoreCache"/> to skip a rescan.</summary>
         public static string GetCacheXml()
         {
             _ensureLoaded();

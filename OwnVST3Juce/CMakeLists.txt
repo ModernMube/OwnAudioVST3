@@ -28,6 +28,7 @@ add_library(ownvst3 SHARED
     src/Exports.cpp
     src/PluginInstance.cpp
     src/PluginScanner.cpp
+    src/AudioUnitRegistry.cpp
     src/EditorWindow.cpp
     src/StringCache.cpp
 )
@@ -40,10 +41,6 @@ target_include_directories(ownvst3 PRIVATE
 # JUCE compile-time feature flags.
 # All flags must be defined before the JUCE headers are first included
 # (CMake propagates them via the target's compile definitions).
-# AU hosting only exists on Apple platforms; enabling the flag elsewhere would
-# make juce_audio_processors pull in CoreAudioKit headers that do not exist there.
-# VST3 hosting is unaffected either way — the two formats live side by side in
-# AudioPluginFormatManager and are matched by file extension / identifier prefix.
 target_compile_definitions(ownvst3 PRIVATE
     JUCE_PLUGINHOST_VST3=1
     $<IF:$<BOOL:${APPLE}>,JUCE_PLUGINHOST_AU=1,JUCE_PLUGINHOST_AU=0>
@@ -87,8 +84,6 @@ elseif(APPLE)
         PREFIX       "lib"
         SUFFIX       ".dylib"
     )
-    # AudioUnit + CoreAudioKit are what AU hosting needs: the component registry
-    # and the Cocoa/generic parameter views JUCE falls back to.
     target_link_libraries(ownvst3 PRIVATE
         "-framework Cocoa"
         "-framework CoreAudio"

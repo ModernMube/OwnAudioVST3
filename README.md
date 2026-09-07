@@ -16,7 +16,7 @@ A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on ma
 - **Thread-safe by design** — dedicated plugin thread, lock-free UI→audio parameter queue, atomic state machine
 - **Full VST3 support** — instruments, effects, MIDI-only plugins, parameter automation, transport context
 - **Audio Unit support on macOS** — AUv2 `.component` bundles alongside VST3, through the same API
-- **Background plugin scanner** — finds VST3 bundles *and* registry-only AudioUnits, with progress reporting and a cacheable result list
+- **Sub-second plugin scanner** — finds VST3 bundles *and* registry-only AudioUnits without loading them; opt into a full scan when you need channel counts
 - **Cross-platform native editors** — Win32 (STA), Cocoa (GCD main thread), X11 (dedicated event loop)
 - **Zero allocation audio path** — pre-pinned buffers, no heap allocation inside `ProcessAudio`
 - **Queryable plugin state** — `NotLoaded → Loaded → Ready ↔ Processing | Error`
@@ -79,13 +79,9 @@ VST3 works exactly as it always has — passing a `.vst3` path to `LoadPluginAsy
 AudioUnits cannot be found by walking directories: they live in the system's AudioComponent registry and are addressed by an identifier rather than a file path. That is what `PluginScanner` is for.
 
 ```csharp
-// Scan both formats in the background. Slow — each plugin is instantiated once —
-// so report progress and cache the result.
-var progress = new Progress<ScanProgress>(p =>
-    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem} ({p.FoundSoFar} found)"));
-
-IReadOnlyList<PluginDescriptor> found =
-    await PluginScanner.ScanAsync(PluginFormat.All, progress);
+// Fast scan — reads the AudioComponent registry and VST3 bundle names.
+// Nothing is loaded, so this returns in a fraction of a second.
+IReadOnlyList<PluginDescriptor> found = await PluginScanner.ScanAsync();
 
 foreach (var p in found.Where(p => p.Format == PluginFormat.AudioUnit))
     Console.WriteLine($"{p.Name} — {p.Vendor} — {p.Identifier}");
@@ -94,7 +90,18 @@ foreach (var p in found.Where(p => p.Format == PluginFormat.AudioUnit))
 await plugin.LoadPluginAsync(found[0]);
 Console.WriteLine(await plugin.GetFormatAsync()); // PluginFormat.AudioUnit
 
-// Skip the next scan entirely.
+// Channel counts are -1 after a fast scan; fill them in for one plugin on demand.
+PluginDescriptor? full = await PluginScanner.ResolveAsync(found[0]);
+```
+
+A fast scan skips channel counts because getting them means loading the plugin. If you really need them for the whole list up front, ask for `ScanMode.Full` — that loads every plugin and takes minutes, so report progress and cache the result:
+
+```csharp
+var progress = new Progress<ScanProgress>(p =>
+    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem}"));
+
+await PluginScanner.ScanAsync(PluginFormat.All, ScanMode.Full, progress);
+
 File.WriteAllText(cacheFile, PluginScanner.GetCacheXml());
 PluginScanner.RestoreCache(File.ReadAllText(cacheFile));
 ```

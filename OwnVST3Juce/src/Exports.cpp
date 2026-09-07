@@ -17,7 +17,17 @@
 
 OWNVST3_API bool OwnPlugin_ScanStart(int formatMask)
 {
-    return PluginScanner::instance().start(formatMask);
+    return PluginScanner::instance().start(formatMask, OWNPLUGIN_SCAN_FAST);
+}
+
+OWNVST3_API bool OwnPlugin_ScanStartMode(int formatMask, int mode)
+{
+    return PluginScanner::instance().start(formatMask, mode);
+}
+
+OWNVST3_API bool OwnPlugin_ResolveDescriptor(const char* identifier, PluginDescriptorC* out)
+{
+    return PluginScanner::instance().resolve(identifier, out);
 }
 
 OWNVST3_API bool OwnPlugin_ScanIsRunning()

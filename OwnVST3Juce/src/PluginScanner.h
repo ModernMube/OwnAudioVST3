@@ -11,28 +11,22 @@
 #include <vector>
 
 /**
- * Process-wide plugin discovery across every format JUCE was compiled with.
- *
- * Exists because AudioUnits cannot be found by walking directories the way VST3
- * bundles can — they live in the AudioComponent registry and are addressed by an
- * "AudioUnit:Type/subtype,manufacturer" identifier.  The VST3 side of the host is
- * untouched by this class; it is an additional entry point, not a replacement.
- *
- * Threading: the scan runs on its own std::thread, never on the JUCE message
- * thread — JUCE's findAllTypesForFile() silently skips plugins that need an
- * unblocked message thread when called from it.
+ * Process-wide plugin discovery across every format JUCE was built with.
+ * The scan runs on its own thread, never the JUCE message thread — JUCE silently
+ * skips plugins needing an unblocked message thread when called from it.
  */
 class PluginScanner
 {
 public:
     static PluginScanner& instance();
 
-    bool  start(int formatMask);
+    bool  start(int formatMask, int mode);
+    bool  resolve(const char* identifier, PluginDescriptorC* out);
+
     bool  isRunning() const noexcept   { return _running.load(std::memory_order_acquire); }
     float progress() const noexcept;
     void  cancel() noexcept            { _cancelled.store(true, std::memory_order_release); }
 
-    /** Name of whatever is being probed right now, for a progress label. */
     const char* currentItem() const;
 
     int  resultCount() const;
@@ -45,16 +39,23 @@ private:
     PluginScanner() = default;
     ~PluginScanner();
 
-    /** One row of the result list; owns its strings so the C pointers stay put. */
+    /** Owns its strings so the C pointers handed across P/Invoke stay put. */
     struct Entry
     {
         std::string name, vendor, version, category, identifier, formatName, filePath;
-        int isInstrument = 0, numInputs = 0, numOutputs = 0, uniqueId = 0;
+        int isInstrument = 0, numInputs = -1, numOutputs = -1, uniqueId = 0;
     };
 
-    void _scanWorker(int formatMask);
+    void _scanWorker(int formatMask, int mode);
+    void _fastScan(int formatMask);
+    void _fullScan(int formatMask);
+    void _addDescription(const juce::PluginDescription& desc);
     void _rebuildEntries(const juce::Array<juce::PluginDescription>& types);
+    void _sortEntries();
     void _joinWorker();
+
+    static juce::PluginDescription _describeVst3Bundle(const juce::String& path);
+    static void _copyOut(const Entry& e, PluginDescriptorC* out);
 
     mutable std::mutex                   _mutex;
     juce::KnownPluginList                _list;

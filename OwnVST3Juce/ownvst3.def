@@ -37,6 +37,8 @@ EXPORTS
     VST3Plugin_ClearStringCache
     VST3Plugin_SafeDispatchMessage
     OwnPlugin_ScanStart
+    OwnPlugin_ScanStartMode
+    OwnPlugin_ResolveDescriptor
     OwnPlugin_ScanIsRunning
     OwnPlugin_ScanProgress
     OwnPlugin_ScanCurrentItem

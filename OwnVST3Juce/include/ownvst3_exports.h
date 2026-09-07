@@ -96,18 +96,19 @@ typedef struct {
 #define OWNPLUGIN_FORMAT_AUDIOUNIT  0x02
 #define OWNPLUGIN_FORMAT_ALL        0x7fffffff
 
+#define OWNPLUGIN_SCAN_FAST  0   /* metadata only, nothing is loaded */
+#define OWNPLUGIN_SCAN_FULL  1   /* loads every plugin, fills in channel counts */
+
+/** Scan modes for OwnPlugin_ScanStartMode(). */
+#define OWNPLUGIN_SCAN_FAST  0   /* registry / bundle metadata only, nothing is loaded */
+#define OWNPLUGIN_SCAN_FULL  1   /* loads every plugin — minutes, but fills in everything */
+
 /**
- * One discovered plugin, filled in by OwnPlugin_GetScannedAt().
- *
- * All char* pointers are owned by the scanner and stay valid until the next
- * OwnPlugin_ScanStart() / OwnPlugin_RestoreScanCacheXml() call.  Copy the
- * strings out (Marshal.PtrToStringUTF8) rather than holding the pointers.
- *
- * 'identifier' is what you pass to VST3Plugin_LoadPlugin(): a filesystem path
- * for VST3, and an "AudioUnit:Type/subtype,manufacturer" token for AU, which
- * has no path equivalent — that is the whole reason this API exists.
- *
- * C# counterpart: PluginDescriptorC  (LayoutKind.Sequential)
+ * One discovered plugin. The char* pointers are owned by the scanner and stay
+ * valid until the next scan or cache restore, so copy them out.
+ * 'identifier' is what VST3Plugin_LoadPlugin() takes: a path for VST3, an
+ * "AudioUnit:Type/subtype,manufacturer" token for AU. Channel counts are -1
+ * after a fast scan until OwnPlugin_ResolveDescriptor() fills them in.
  */
 typedef struct {
     const char* name;
@@ -124,13 +125,17 @@ typedef struct {
     int32_t     _reserved;      /* explicit padding – do not use */
 } PluginDescriptorC;
 
-/**
- * Kicks off a background scan of every enabled format.  Returns false if a scan
- * is already running.  Scanning instantiates each plugin once, so it is slow
- * (minutes for a large AU collection) — poll OwnPlugin_ScanIsRunning() and cache
- * the result via OwnPlugin_GetScanCacheXml().
- */
+/** Background scan in fast mode. Returns false if a scan is already running. */
 OWNVST3_API bool OwnPlugin_ScanStart(int formatMask);
+
+/** As above with an explicit OWNPLUGIN_SCAN_* mode. */
+OWNVST3_API bool OwnPlugin_ScanStartMode(int formatMask, int mode);
+
+/**
+ * Loads the one plugin named by identifier to fill in what a fast scan left out
+ * (channel counts), and updates the cached entry. Blocks; do not call on the UI thread.
+ */
+OWNVST3_API bool OwnPlugin_ResolveDescriptor(const char* identifier, PluginDescriptorC* out);
 
 /** True while the background scan thread is still working. */
 OWNVST3_API bool OwnPlugin_ScanIsRunning();

@@ -492,11 +492,7 @@ Console.WriteLine(OwnVst3Wrapper.GetVst3DirectoriesInfo());
 `FindVst3Plugins()` above walks directories, which works for VST3 bundles but can never find an AudioUnit — AUs live in the macOS AudioComponent registry and are addressed by an identifier, not a path. `PluginScanner` goes through the native side instead and returns both formats.
 
 ```csharp
-var progress = new Progress<ScanProgress>(p =>
-    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem} ({p.FoundSoFar} found)"));
-
-IReadOnlyList<PluginDescriptor> all =
-    await PluginScanner.ScanAsync(PluginFormat.All, progress);
+IReadOnlyList<PluginDescriptor> all = await PluginScanner.ScanAsync();
 
 // Only AudioUnits, only instruments:
 var synths = all.Where(p => p.Format == PluginFormat.AudioUnit && p.IsInstrument);
@@ -505,9 +501,18 @@ var synths = all.Where(p => p.Format == PluginFormat.AudioUnit && p.IsInstrument
 await plugin.LoadPluginAsync(all[0]);
 ```
 
-Scanning instantiates every plugin once, so it takes seconds to minutes. Cache the result and restore it on the next start:
+### Fast vs. full scans
+
+`ScanMode.Fast` (the default) reads only metadata that costs nothing: the macOS AudioComponent registry for AUs, bundle names for VST3. No plugin is loaded, so a machine with hundreds of plugins scans in a fraction of a second. The price is that `InputChannels` and `OutputChannels` come back as `-1` — getting those means loading the plugin.
+
+`ScanMode.Full` does load every plugin, which is what JUCE's own scanning does and why DAW plugin scans take minutes. Use it only if you genuinely need channel counts for the entire list up front, and cache the result:
 
 ```csharp
+var progress = new Progress<ScanProgress>(p =>
+    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem} ({p.FoundSoFar} found)"));
+
+await PluginScanner.ScanAsync(PluginFormat.All, ScanMode.Full, progress);
+
 File.WriteAllText(cacheFile, PluginScanner.GetCacheXml());
 
 // Next launch — no scan needed:
@@ -515,17 +520,25 @@ if (PluginScanner.RestoreCache(File.ReadAllText(cacheFile)))
     var known = PluginScanner.GetResults();
 ```
 
+Usually you want neither: fast-scan for the list, then resolve the one plugin the user picked.
+
+```csharp
+PluginDescriptor? resolved = await PluginScanner.ResolveAsync(chosen);
+Console.WriteLine($"{resolved?.InputChannels} in / {resolved?.OutputChannels} out");
+```
+
 `ScanAsync` honours a `CancellationToken`; `PluginScanner.Cancel()` does the same thing imperatively. `PluginScanner.IsSupported` is `false` against a native library older than 1.7.0.
 
 | Member | Description |
 |---|---|
-| `ScanAsync(formats, progress, ct)` | Runs the scan on the native background thread, returns the full list |
+| `ScanAsync(formats, mode, progress, ct)` | Runs the scan on the native background thread, returns the list |
+| `ResolveAsync(descriptor, ct)` | Loads one plugin to fill in what a fast scan left out |
 | `GetResults()` | Current result list; safe to call mid-scan for partial results |
 | `GetCacheXml()` / `RestoreCache(xml)` | Persist and reload the list to skip a rescan |
-| `IsScanning`, `Progress`, `CurrentItem`, `Cancel()` | Progress polling and cancellation |
+| `IsScanning`, `CurrentItem`, `Cancel()` | Progress polling and cancellation |
 | `IsSupported`, `AudioUnitSupported` | Native library capability / macOS check |
 
-`PluginDescriptor` carries `Name`, `Vendor`, `Version`, `Category`, `Identifier`, `Format`, `FilePath`, `IsInstrument`, `InputChannels`, `OutputChannels` and `UniqueId`. `FilePath` is empty for registry-only AudioUnits — always load by `Identifier`.
+`PluginDescriptor` carries `Name`, `Vendor`, `Version`, `Category`, `Identifier`, `Format`, `FilePath`, `IsInstrument`, `InputChannels`, `OutputChannels`, `UniqueId` and `IsResolved`. `FilePath` is empty for registry-only AudioUnits — always load by `Identifier`.
 
 ### Format-aware loading
 

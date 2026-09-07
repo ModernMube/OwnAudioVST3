@@ -151,7 +151,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             return ok;
         });
 
-    /// <summary>Loads whatever PluginScanner found — VST3 path or AU identifier alike.</summary>
     public Task<bool> LoadPluginAsync(PluginDescriptor plugin) =>
         LoadPluginAsync(plugin.Identifier);
 

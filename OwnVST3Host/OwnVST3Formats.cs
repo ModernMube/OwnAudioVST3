@@ -3,9 +3,8 @@ using System.Runtime.InteropServices;
 namespace OwnVST3Host
 {
     /// <summary>
-    /// Format-aware extras on top of the VST3 API — which format an instance ended
-    /// up hosting, and loading by scanner identifier or bundle sub-index.
-    /// Nothing here touches the existing VST3 code path.
+    /// Format-aware extras: which format an instance ended up hosting, and loading
+    /// by scanner identifier or bundle sub-index.
     /// </summary>
     public partial class OwnVst3Wrapper
     {
@@ -27,16 +26,9 @@ namespace OwnVST3Host
             _getIdentifierFunc = TryGetDelegate<OwnPlugin_GetIdentifierDelegate>("OwnPlugin_GetIdentifier");
         }
 
-        /// <summary>
-        /// Loads a plugin the scanner turned up. Identical to passing its Identifier
-        /// to LoadPlugin — a path for VST3, an "AudioUnit:..." token for AU.
-        /// </summary>
         public bool LoadPlugin(PluginDescriptor plugin) => LoadPlugin(plugin.Identifier);
 
-        /// <summary>
-        /// Picks the subIndex'th plugin out of a bundle that exposes several; AU
-        /// .component bundles routinely do. subIndex 0 is plain LoadPlugin.
-        /// </summary>
+        /// <summary>Picks one plugin out of a bundle holding several; subIndex 0 is plain LoadPlugin.</summary>
         public bool LoadPluginAt(string pluginPath, int subIndex)
         {
             CheckDisposed();
@@ -47,7 +39,7 @@ namespace OwnVST3Host
             return _loadPluginAtFunc(_pluginHandle, pluginPath, subIndex);
         }
 
-        /// <summary>Which format the loaded plugin came from. Null on an older native library.</summary>
+        /// <summary>Null on an older native library.</summary>
         public PluginFormat? Format
         {
             get
