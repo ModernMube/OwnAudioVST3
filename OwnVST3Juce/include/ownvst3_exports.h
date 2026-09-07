@@ -89,6 +89,76 @@ typedef struct {
     int32_t  sampleOffset;
 } MidiEventC;
 
+/* ── Plugin discovery (format-neutral, added in 1.7.0) ─────────────────────── */
+
+/** Bit flags for OwnPlugin_ScanStart(). */
+#define OWNPLUGIN_FORMAT_VST3       0x01
+#define OWNPLUGIN_FORMAT_AUDIOUNIT  0x02
+#define OWNPLUGIN_FORMAT_ALL        0x7fffffff
+
+/**
+ * One discovered plugin, filled in by OwnPlugin_GetScannedAt().
+ *
+ * All char* pointers are owned by the scanner and stay valid until the next
+ * OwnPlugin_ScanStart() / OwnPlugin_RestoreScanCacheXml() call.  Copy the
+ * strings out (Marshal.PtrToStringUTF8) rather than holding the pointers.
+ *
+ * 'identifier' is what you pass to VST3Plugin_LoadPlugin(): a filesystem path
+ * for VST3, and an "AudioUnit:Type/subtype,manufacturer" token for AU, which
+ * has no path equivalent — that is the whole reason this API exists.
+ *
+ * C# counterpart: PluginDescriptorC  (LayoutKind.Sequential)
+ */
+typedef struct {
+    const char* name;
+    const char* vendor;
+    const char* version;
+    const char* category;
+    const char* identifier;
+    const char* formatName;     /* "VST3" or "AudioUnit" */
+    const char* fileOrPath;     /* empty for registry-only AUs */
+    int32_t     isInstrument;
+    int32_t     numInputs;
+    int32_t     numOutputs;
+    int32_t     uniqueId;
+    int32_t     _reserved;      /* explicit padding – do not use */
+} PluginDescriptorC;
+
+/**
+ * Kicks off a background scan of every enabled format.  Returns false if a scan
+ * is already running.  Scanning instantiates each plugin once, so it is slow
+ * (minutes for a large AU collection) — poll OwnPlugin_ScanIsRunning() and cache
+ * the result via OwnPlugin_GetScanCacheXml().
+ */
+OWNVST3_API bool OwnPlugin_ScanStart(int formatMask);
+
+/** True while the background scan thread is still working. */
+OWNVST3_API bool OwnPlugin_ScanIsRunning();
+
+/** Scan progress in [0,1]. */
+OWNVST3_API float OwnPlugin_ScanProgress();
+
+/** Name of the plugin currently being probed, or "" when idle. */
+OWNVST3_API const char* OwnPlugin_ScanCurrentItem();
+
+/** Asks the scan thread to stop after the current plugin. Does not block. */
+OWNVST3_API void OwnPlugin_ScanCancel();
+
+/** Number of plugins found so far. Safe to poll during a scan. */
+OWNVST3_API int OwnPlugin_GetScannedCount();
+
+/** Fills *out with the descriptor at index. Returns false if index is out of range. */
+OWNVST3_API bool OwnPlugin_GetScannedAt(int index, PluginDescriptorC* out);
+
+/**
+ * Serialises the current result list to XML so the host can skip the next scan.
+ * Pointer stays valid until the next call to this function.
+ */
+OWNVST3_API const char* OwnPlugin_GetScanCacheXml();
+
+/** Replaces the result list with a previously saved cache. Returns false on malformed XML. */
+OWNVST3_API bool OwnPlugin_RestoreScanCacheXml(const char* xml);
+
 /* ── Lifecycle ─────────────────────────────────────────────────────────────── */
 
 /** Creates and returns a new plugin instance. Returns NULL on failure. */
@@ -99,8 +169,27 @@ OWNVST3_API void VST3Plugin_Destroy(VST3PluginHandle handle);
 
 /* ── Plugin loading ────────────────────────────────────────────────────────── */
 
-/** Loads the VST3 bundle at pluginPath. Must be called before Initialize(). */
+/**
+ * Loads the plugin at pluginPath. Must be called before Initialize().
+ *
+ * pluginPath is JUCE's "file or identifier": a .vst3 path as always, and on
+ * macOS also a .component path or an "AudioUnit:..." identifier from
+ * OwnPlugin_GetScannedAt().  Behaviour for VST3 paths is unchanged.
+ */
 OWNVST3_API bool VST3Plugin_LoadPlugin(VST3PluginHandle handle, const char* pluginPath);
+
+/**
+ * Same as VST3Plugin_LoadPlugin() but picks the subIndex'th plugin inside a
+ * bundle that exposes several (common for AU .component bundles).
+ * subIndex 0 is exactly what VST3Plugin_LoadPlugin() does.
+ */
+OWNVST3_API bool OwnPlugin_LoadPluginAt(VST3PluginHandle handle, const char* pluginPath, int subIndex);
+
+/** Format the loaded plugin came from: "VST3", "AudioUnit", or "" if nothing is loaded. */
+OWNVST3_API const char* OwnPlugin_GetFormatName(VST3PluginHandle handle);
+
+/** Identifier the loaded plugin was resolved from — round-trips through VST3Plugin_LoadPlugin(). */
+OWNVST3_API const char* OwnPlugin_GetIdentifier(VST3PluginHandle handle);
 
 /**
  * Prepares the plugin for audio processing.

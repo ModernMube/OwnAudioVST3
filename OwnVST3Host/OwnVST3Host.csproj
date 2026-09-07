@@ -9,11 +9,11 @@
     <!-- NuGet packaging information -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>OwnAudioVst</PackageId>
-    <Version>1.6.8</Version>
+    <Version>1.7.0</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
-    <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins. Includes cross-platform native editor support (Windows, macOS, Linux).</Description>
-    <PackageTags>vst;vst3;audio;plugin;wrapper;editor;native;cross-platform</PackageTags>
+    <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins, and AudioUnit plugins on macOS. Includes a background plugin scanner and cross-platform native editor support (Windows, macOS, Linux).</Description>
+    <PackageTags>vst;vst3;audiounit;au;audio;plugin;wrapper;editor;native;cross-platform</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/ModernMube/OwnAudioVST3</RepositoryUrl>

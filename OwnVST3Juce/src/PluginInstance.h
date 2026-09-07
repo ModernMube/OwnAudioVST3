@@ -11,6 +11,13 @@
 #include <vector>
 #include <unordered_map>
 
+/**
+ * Brings up JUCE's message thread / GUI machinery if nothing has done so yet.
+ * PluginInstance's constructor does this implicitly; the scanner needs it too
+ * without creating an instance first.
+ */
+void ownvst3_ensureJuceInitialised();
+
 /** Tag for the kind of state change enqueued from the UI thread. */
 enum class StateChangeKind : uint8_t
 {
@@ -51,6 +58,12 @@ public:
     /** Loads the VST3 bundle and builds the internal parameter map. */
     bool loadPlugin(const char* path);
 
+    /**
+     * Loads the subIndex'th plugin out of a bundle that exposes several — AU
+     * .component bundles routinely do.  subIndex 0 is what loadPlugin() does.
+     */
+    bool loadPluginAt(const char* path, int subIndex);
+
     /** Prepares the plugin for audio processing. */
     bool initialize(double sampleRate, int blockSize);
 
@@ -60,6 +73,8 @@ public:
     const char* getVendor();
     const char* getVersion();
     const char* getPluginInfo();
+    const char* getFormatName();
+    const char* getIdentifier();
     bool        isInstrument()  const;
     bool        isEffect()      const;
     bool        isMidiOnly()    const;
@@ -167,6 +182,12 @@ private:
 
     /* Cached on the JUCE message thread during loadPlugin(); read from any thread. */
     bool _hasEditor { false };
+
+    /* Which plugin to pick out of a multi-plugin bundle. Set by loadPluginAt(). */
+    int _subIndex { 0 };
+
+    /* The file-or-identifier the instance was actually loaded from. */
+    std::string _identifier;
 
     /* Lifecycle */
     std::atomic<bool> _disposed { false };

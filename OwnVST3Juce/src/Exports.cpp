@@ -10,7 +10,55 @@
  */
 
 #include "PluginInstance.h"
+#include "PluginScanner.h"
 #include "../include/ownvst3_exports.h"
+
+/* ── Discovery ─────────────────────────────────────────────────────────────── */
+
+OWNVST3_API bool OwnPlugin_ScanStart(int formatMask)
+{
+    return PluginScanner::instance().start(formatMask);
+}
+
+OWNVST3_API bool OwnPlugin_ScanIsRunning()
+{
+    return PluginScanner::instance().isRunning();
+}
+
+OWNVST3_API float OwnPlugin_ScanProgress()
+{
+    return PluginScanner::instance().progress();
+}
+
+OWNVST3_API const char* OwnPlugin_ScanCurrentItem()
+{
+    return PluginScanner::instance().currentItem();
+}
+
+OWNVST3_API void OwnPlugin_ScanCancel()
+{
+    PluginScanner::instance().cancel();
+}
+
+OWNVST3_API int OwnPlugin_GetScannedCount()
+{
+    return PluginScanner::instance().resultCount();
+}
+
+OWNVST3_API bool OwnPlugin_GetScannedAt(int index, PluginDescriptorC* out)
+{
+    return PluginScanner::instance().resultAt(index, out);
+}
+
+OWNVST3_API const char* OwnPlugin_GetScanCacheXml()
+{
+    return PluginScanner::instance().cacheXml();
+}
+
+OWNVST3_API bool OwnPlugin_RestoreScanCacheXml(const char* xml)
+{
+    return PluginScanner::instance().restoreCache(xml);
+}
 
 /* ── Lifecycle ─────────────────────────────────────────────────────────────── */
 
@@ -30,6 +78,25 @@ OWNVST3_API bool VST3Plugin_LoadPlugin(VST3PluginHandle handle, const char* plug
 {
     if (!handle) return false;
     return static_cast<PluginInstance*>(handle)->loadPlugin(pluginPath);
+}
+
+OWNVST3_API bool OwnPlugin_LoadPluginAt(VST3PluginHandle handle,
+                                         const char* pluginPath, int subIndex)
+{
+    if (!handle) return false;
+    return static_cast<PluginInstance*>(handle)->loadPluginAt(pluginPath, subIndex);
+}
+
+OWNVST3_API const char* OwnPlugin_GetFormatName(VST3PluginHandle handle)
+{
+    if (!handle) return "";
+    return static_cast<PluginInstance*>(handle)->getFormatName();
+}
+
+OWNVST3_API const char* OwnPlugin_GetIdentifier(VST3PluginHandle handle)
+{
+    if (!handle) return "";
+    return static_cast<PluginInstance*>(handle)->getIdentifier();
 }
 
 OWNVST3_API bool VST3Plugin_Initialize(VST3PluginHandle handle,

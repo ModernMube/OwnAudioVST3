@@ -151,6 +151,27 @@ public sealed class ThreadedVst3Wrapper : IDisposable
             return ok;
         });
 
+    /// <summary>Loads whatever PluginScanner found — VST3 path or AU identifier alike.</summary>
+    public Task<bool> LoadPluginAsync(PluginDescriptor plugin) =>
+        LoadPluginAsync(plugin.Identifier);
+
+    /// <summary>For bundles holding several plugins; subIndex 0 equals LoadPluginAsync.</summary>
+    public Task<bool> LoadPluginAtAsync(string pluginPath, int subIndex) =>
+        PostCommand(() =>
+        {
+            bool ok = _inner.LoadPluginAt(pluginPath, subIndex);
+            Interlocked.Exchange(ref _state, ok
+                ? (int)VstPluginState.Loaded
+                : (int)VstPluginState.Error);
+            return ok;
+        });
+
+    public Task<PluginFormat?> GetFormatAsync() =>
+        PostCommand(() => _inner.Format);
+
+    public Task<string?> GetIdentifierAsync() =>
+        PostCommand(() => _inner.Identifier);
+
     public Task<bool> InitializeAsync(double sampleRate, int maxBlockSize) =>
         PostCommand(() =>
         {

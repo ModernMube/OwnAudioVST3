@@ -4,7 +4,7 @@
   <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="600"/>
 </p>
 
-A thread-safe, cross-platform C# library for hosting VST3 plugins. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is powered by [JUCE](https://juce.com/), providing broad plugin compatibility across all supported platforms.
+A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on macOS, Audio Units as well. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is powered by [JUCE](https://juce.com/), providing broad plugin compatibility across all supported platforms.
 
 [![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnVst3Host/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,6 +15,8 @@ A thread-safe, cross-platform C# library for hosting VST3 plugins. Built for aud
 
 - **Thread-safe by design** — dedicated plugin thread, lock-free UI→audio parameter queue, atomic state machine
 - **Full VST3 support** — instruments, effects, MIDI-only plugins, parameter automation, transport context
+- **Audio Unit support on macOS** — AUv2 `.component` bundles alongside VST3, through the same API
+- **Background plugin scanner** — finds VST3 bundles *and* registry-only AudioUnits, with progress reporting and a cacheable result list
 - **Cross-platform native editors** — Win32 (STA), Cocoa (GCD main thread), X11 (dedicated event loop)
 - **Zero allocation audio path** — pre-pinned buffers, no heap allocation inside `ProcessAudio`
 - **Queryable plugin state** — `NotLoaded → Loaded → Ready ↔ Processing | Error`
@@ -70,6 +72,39 @@ await editor.OpenEditorAsync(name);
 
 ---
 
+## Audio Units (macOS)
+
+VST3 works exactly as it always has — passing a `.vst3` path to `LoadPluginAsync` is unchanged. On macOS the same call also accepts a `.component` path or an AudioUnit identifier, so both formats share one API.
+
+AudioUnits cannot be found by walking directories: they live in the system's AudioComponent registry and are addressed by an identifier rather than a file path. That is what `PluginScanner` is for.
+
+```csharp
+// Scan both formats in the background. Slow — each plugin is instantiated once —
+// so report progress and cache the result.
+var progress = new Progress<ScanProgress>(p =>
+    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem} ({p.FoundSoFar} found)"));
+
+IReadOnlyList<PluginDescriptor> found =
+    await PluginScanner.ScanAsync(PluginFormat.All, progress);
+
+foreach (var p in found.Where(p => p.Format == PluginFormat.AudioUnit))
+    Console.WriteLine($"{p.Name} — {p.Vendor} — {p.Identifier}");
+
+// Load one — Identifier is a path for VST3, an "AudioUnit:..." token for AU.
+await plugin.LoadPluginAsync(found[0]);
+Console.WriteLine(await plugin.GetFormatAsync()); // PluginFormat.AudioUnit
+
+// Skip the next scan entirely.
+File.WriteAllText(cacheFile, PluginScanner.GetCacheXml());
+PluginScanner.RestoreCache(File.ReadAllText(cacheFile));
+```
+
+`OwnVst3Wrapper.FindVst3Plugins()` is untouched and still does the plain VST3 directory walk — use it when you only care about VST3.
+
+> Note: AUv2 plugins are loaded in-process, so an Intel-only AudioUnit cannot be hosted by an ARM64 process. Under the hardened runtime the host needs the `com.apple.security.cs.disable-library-validation` entitlement, same as for third-party VST3 bundles.
+
+---
+
 ## Threading Model
 
 ```
@@ -99,11 +134,11 @@ plugin.ProcessAudio(inputs, outputs, channels, samples);
 
 ## Platform Support
 
-| Platform | Architecture | Window backend |
-|---|---|---|
-| Windows | x64, x86, ARM64 | Win32 STA thread + message loop |
-| macOS | x64, ARM64 | Cocoa via GCD (`dispatch_sync` to main thread) |
-| Linux | x64, ARM64 | X11 dedicated event loop thread |
+| Platform | Architecture | Formats | Window backend |
+|---|---|---|---|
+| Windows | x64, x86, ARM64 | VST3 | Win32 STA thread + message loop |
+| macOS | x64, ARM64 | VST3, AudioUnit | Cocoa via GCD (`dispatch_sync` to main thread) |
+| Linux | x64, ARM64 | VST3 | X11 dedicated event loop thread |
 
 Native libraries are resolved automatically from `runtimes/{rid}/native/` at runtime.
 
@@ -116,6 +151,8 @@ OwnAudioVST3/
 ├── OwnVST3Host/          # Main library (C#)
 │   ├── ThreadedVst3Wrapper.cs      # Primary API — thread-safe VST3 façade
 │   ├── OwnVst3Wrapper.cs           # Low-level native wrapper + platform detection
+│   ├── OwnVST3Formats.cs           # Format-aware extras (AU identifier / bundle sub-index)
+│   ├── PluginDiscovery.cs          # PluginScanner, PluginDescriptor, PluginFormat
 │   ├── LockFreeQueue.cs            # SPSC ring buffer (UI → audio thread)
 │   └── NativeWindow/
 │       ├── INativeWindow.cs        # Platform-agnostic window interface
@@ -129,6 +166,7 @@ OwnAudioVST3/
 │   ├── include/ownvst3_exports.h   # C ABI exported by the native library
 │   └── src/
 │       ├── PluginInstance.cpp/h    # JUCE AudioPluginInstance host wrapper
+│       ├── PluginScanner.cpp/h     # Background VST3 + AudioUnit discovery
 │       ├── EditorWindow.cpp/h      # Native plugin editor window management
 │       ├── Exports.cpp             # P/Invoke entry points
 │       ├── SpscQueue.h             # Lock-free parameter queue
@@ -178,7 +216,7 @@ Topics covered:
 - Transport and tempo integration
 - MIDI scheduling with `SampleOffset`
 - Editor lifecycle with Avalonia examples
-- Plugin discovery and platform detection
+- Plugin discovery (VST3 directories, AudioUnit scanning) and platform detection
 - Best practices and common pitfalls
 
 ---

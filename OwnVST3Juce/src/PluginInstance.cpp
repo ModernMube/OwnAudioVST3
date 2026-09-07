@@ -106,6 +106,11 @@ static void initJuceOnce()
 #endif
 }
 
+void ownvst3_ensureJuceInitialised()
+{
+    std::call_once(s_juceInitFlag, initJuceOnce);
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * PluginPlayHead – feeds transport info to the plugin on the audio thread
  * ────────────────────────────────────────────────────────────────────────────*/
@@ -177,9 +182,15 @@ bool PluginInstance::loadPluginBody(PluginInstance* self, const char* path)
 
         if (!found.isEmpty())
         {
+            // _subIndex is 0 unless loadPluginAt() set it, so the VST3 path is unchanged.
+            const int idx = juce::isPositiveAndBelow(self->_subIndex, found.size())
+                          ? self->_subIndex : 0;
+
             juce::String errorMsg;
             self->_plugin = self->_formatManager.createPluginInstance(
-                *found[0], self->_sampleRate, self->_blockSize, errorMsg);
+                *found[idx], self->_sampleRate, self->_blockSize, errorMsg);
+
+            self->_identifier = found[idx]->fileOrIdentifier.toStdString();
             break;
         }
     }
@@ -272,6 +283,12 @@ bool PluginInstance::loadPlugin(const char* path)
 #endif
 }
 
+bool PluginInstance::loadPluginAt(const char* path, int subIndex)
+{
+    _subIndex = subIndex > 0 ? subIndex : 0;
+    return loadPlugin(path);
+}
+
 bool PluginInstance::initialize(double sampleRate, int blockSize)
 {
     if (!_plugin) return false;
@@ -350,6 +367,19 @@ const char* PluginInstance::getPluginInfo()
         desc.manufacturerName.toStdString()  + " | " +
         desc.version.toStdString();
     return _strings.store("info", info);
+}
+
+const char* PluginInstance::getFormatName()
+{
+    if (!_plugin) return "";
+    juce::PluginDescription desc;
+    _plugin->fillInPluginDescription(desc);
+    return _strings.store("format", desc.pluginFormatName.toStdString());
+}
+
+const char* PluginInstance::getIdentifier()
+{
+    return _identifier.c_str();
 }
 
 bool PluginInstance::isInstrument() const

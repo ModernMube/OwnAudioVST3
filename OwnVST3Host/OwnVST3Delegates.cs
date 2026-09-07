@@ -86,6 +86,8 @@ namespace OwnVST3Host
             _getStateFunc = TryGetDelegate<VST3Plugin_GetStateDelegate>("VST3Plugin_GetState");
             _setStateFunc = TryGetDelegate<VST3Plugin_SetStateDelegate>("VST3Plugin_SetState");
             _freeStateDataFunc = TryGetDelegate<VST3Plugin_FreeStateDataDelegate>("VST3Plugin_FreeStateData");
+
+            _initFormatDelegates(); // 1.7.0+ format extras, all optional
         }
 
         private T GetDelegate<T>(string functionName) where T : Delegate

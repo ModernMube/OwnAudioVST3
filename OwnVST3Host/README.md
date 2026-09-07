@@ -1,6 +1,6 @@
 # OwnVST3Host — Developer Guide
 
-A thread-safe, cross-platform C# library for hosting VST3 plugins. Designed to integrate cleanly into audio applications where the UI thread, the audio thread, and the plugin's native runtime must never interfere with each other.
+A thread-safe, cross-platform C# library for hosting VST3 plugins — plus AudioUnits on macOS. Designed to integrate cleanly into audio applications where the UI thread, the audio thread, and the plugin's native runtime must never interfere with each other.
 
 ---
 
@@ -487,6 +487,61 @@ Console.WriteLine(OwnVst3Wrapper.GetVst3DirectoriesInfo());
 //     [OK] /Users/yourname/Library/Audio/Plug-Ins/VST3
 ```
 
+### Scanning every format (VST3 + AudioUnit)
+
+`FindVst3Plugins()` above walks directories, which works for VST3 bundles but can never find an AudioUnit — AUs live in the macOS AudioComponent registry and are addressed by an identifier, not a path. `PluginScanner` goes through the native side instead and returns both formats.
+
+```csharp
+var progress = new Progress<ScanProgress>(p =>
+    Console.WriteLine($"{p.Fraction:P0} — {p.CurrentItem} ({p.FoundSoFar} found)"));
+
+IReadOnlyList<PluginDescriptor> all =
+    await PluginScanner.ScanAsync(PluginFormat.All, progress);
+
+// Only AudioUnits, only instruments:
+var synths = all.Where(p => p.Format == PluginFormat.AudioUnit && p.IsInstrument);
+
+// Load one — Identifier is a bundle path for VST3, an "AudioUnit:..." token for AU.
+await plugin.LoadPluginAsync(all[0]);
+```
+
+Scanning instantiates every plugin once, so it takes seconds to minutes. Cache the result and restore it on the next start:
+
+```csharp
+File.WriteAllText(cacheFile, PluginScanner.GetCacheXml());
+
+// Next launch — no scan needed:
+if (PluginScanner.RestoreCache(File.ReadAllText(cacheFile)))
+    var known = PluginScanner.GetResults();
+```
+
+`ScanAsync` honours a `CancellationToken`; `PluginScanner.Cancel()` does the same thing imperatively. `PluginScanner.IsSupported` is `false` against a native library older than 1.7.0.
+
+| Member | Description |
+|---|---|
+| `ScanAsync(formats, progress, ct)` | Runs the scan on the native background thread, returns the full list |
+| `GetResults()` | Current result list; safe to call mid-scan for partial results |
+| `GetCacheXml()` / `RestoreCache(xml)` | Persist and reload the list to skip a rescan |
+| `IsScanning`, `Progress`, `CurrentItem`, `Cancel()` | Progress polling and cancellation |
+| `IsSupported`, `AudioUnitSupported` | Native library capability / macOS check |
+
+`PluginDescriptor` carries `Name`, `Vendor`, `Version`, `Category`, `Identifier`, `Format`, `FilePath`, `IsInstrument`, `InputChannels`, `OutputChannels` and `UniqueId`. `FilePath` is empty for registry-only AudioUnits — always load by `Identifier`.
+
+### Format-aware loading
+
+```csharp
+// Which format did we end up hosting?
+PluginFormat? fmt = await plugin.GetFormatAsync();   // Vst3 | AudioUnit | null on old natives
+string? id = await plugin.GetIdentifierAsync();      // round-trips back through LoadPluginAsync
+
+// AU .component bundles often hold several plugins; pick one explicitly.
+await plugin.LoadPluginAtAsync("/Library/Audio/Plug-Ins/Components/Suite.component", subIndex: 2);
+```
+
+`subIndex: 0` behaves exactly like `LoadPluginAsync(path)`.
+
+> AUv2 plugins load in-process, so an Intel-only AudioUnit cannot be hosted by an ARM64 process. Under the hardened runtime the host needs `com.apple.security.cs.disable-library-validation`, the same entitlement third-party VST3 bundles require.
+
 ### Runtime / architecture detection
 
 ```csharp
@@ -502,7 +557,7 @@ string path = OwnVst3Wrapper.GetNativeLibraryPath();  // full path to the loaded
 | Platform | Architecture | Window API | Notes |
 |---|---|---|---|
 | Windows | x64, x86 | Win32 (STA thread) | Full editor and audio support |
-| macOS | x64, ARM64 | Cocoa (main thread via GCD) | Requires `[STAThread]` or Avalonia dispatcher |
+| macOS | x64, ARM64 | Cocoa (main thread via GCD) | VST3 + AudioUnit. Requires `[STAThread]` or Avalonia dispatcher |
 | Linux | x64 | X11 (dedicated event thread) | Requires running X server; Wayland via XWayland |
 
 ### Native library search order
@@ -532,7 +587,9 @@ The library is searched in this order at runtime:
 
 | Method | Returns | Description |
 |---|---|---|
-| `LoadPluginAsync(path)` | `Task<bool>` | Load the plugin binary and create the factory. Sets state to `Loaded` or `Error`. |
+| `LoadPluginAsync(path)` | `Task<bool>` | Load the plugin binary and create the factory. Sets state to `Loaded` or `Error`. Accepts a `.vst3` path, and on macOS a `.component` path or `AudioUnit:` identifier. |
+| `LoadPluginAsync(descriptor)` | `Task<bool>` | Same, from a `PluginDescriptor` returned by `PluginScanner`. |
+| `LoadPluginAtAsync(path, subIndex)` | `Task<bool>` | Picks one plugin out of a multi-plugin bundle; `subIndex: 0` equals `LoadPluginAsync(path)`. |
 | `InitializeAsync(sampleRate, maxBlockSize)` | `Task<bool>` | Start the audio engine. Sets state to `Ready` or `Error`. |
 | `Dispose()` | — | Stop the plugin thread, free all native resources. |
 
@@ -543,6 +600,8 @@ The library is searched in this order at runtime:
 | `GetNameAsync()` | `Task<string>` |
 | `GetVendorAsync()` | `Task<string>` |
 | `GetVersionAsync()` | `Task<string?>` |
+| `GetFormatAsync()` | `Task<PluginFormat?>` |
+| `GetIdentifierAsync()` | `Task<string?>` |
 | `GetIsInstrumentAsync()` | `Task<bool>` |
 | `GetIsEffectAsync()` | `Task<bool>` |
 | `GetIsMidiOnlyAsync()` | `Task<bool>` |
