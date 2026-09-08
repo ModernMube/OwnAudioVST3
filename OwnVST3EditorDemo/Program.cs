@@ -51,6 +51,7 @@ public class MainWindow : Window
     // keeping the Avalonia UI thread completely free.
     private ThreadedVst3Wrapper? _plugin;
     private readonly ListBox _pluginList;
+    private readonly ComboBox _formatFilter;
     private readonly TextBlock _statusText;
     private readonly Button _openEditorButton;
     private readonly Button _playButton;
@@ -61,22 +62,39 @@ public class MainWindow : Window
 
     public MainWindow()
     {
-        Title = "VST3 Editor Demo";
-        Width = 600;
+        Title = "VST3 / AudioUnit Editor Demo";
+        Width = 640;
         Height = 500;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
 
         var mainPanel = new DockPanel { Margin = new Thickness(10) };
 
-        var titleBlock = new TextBlock
+        var headerPanel = new StackPanel
         {
-            Text = "VST3 Plugin Browser",
-            FontSize = 20,
-            FontWeight = FontWeight.Bold,
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
             Margin = new Thickness(0, 0, 0, 10)
         };
-        DockPanel.SetDock(titleBlock, Dock.Top);
-        mainPanel.Children.Add(titleBlock);
+
+        headerPanel.Children.Add(new TextBlock
+        {
+            Text = "Plugin Browser",
+            FontSize = 20,
+            FontWeight = FontWeight.Bold,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+
+        _formatFilter = new ComboBox
+        {
+            ItemsSource = new List<string> { "All formats", "VST3 only", "AudioUnit only" },
+            SelectedIndex = 0,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _formatFilter.SelectionChanged += (_, _) => RefreshPluginList();
+        headerPanel.Children.Add(_formatFilter);
+
+        DockPanel.SetDock(headerPanel, Dock.Top);
+        mainPanel.Children.Add(headerPanel);
 
         _statusText = new TextBlock { Text = "Ready", Margin = new Thickness(0, 10, 0, 0) };
         DockPanel.SetDock(_statusText, Dock.Bottom);
@@ -144,19 +162,39 @@ public class MainWindow : Window
         Opened += (_, _) => RefreshPluginList();
     }
 
-    private void RefreshPluginList()
+    private PluginFormat SelectedFormats => _formatFilter.SelectedIndex switch
     {
-        _statusText.Text = "Scanning for VST3 plugins…";
+        1 => PluginFormat.Vst3,
+        2 => PluginFormat.AudioUnit,
+        _ => PluginFormat.All
+    };
+
+    // Fast scan – reads the AU component registry and VST3 bundle names without
+    // loading anything, so this comes back in well under a second.
+    private async void RefreshPluginList()
+    {
+        _statusText.Text = "Scanning…";
         _pluginList.ItemsSource = null;
 
         try
         {
-            var plugins = OwnVst3Wrapper.FindVst3Plugins();
-            _pluginList.ItemsSource = plugins
-                .Select(p => new PluginItem { Path = p, Name = Path.GetFileNameWithoutExtension(p) })
-                .ToList();
+            if (!PluginScanner.IsSupported)
+            {
+                var paths = OwnVst3Wrapper.FindVst3Plugins();
+                _pluginList.ItemsSource = paths.Select(p => new PluginItem(p)).ToList();
+                _statusText.Text = $"Found {paths.Count} VST3 plugin(s) – native library is pre-1.7.0, no AU support";
+                return;
+            }
 
-            _statusText.Text = $"Found {plugins.Count} VST3 plugin(s)";
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var plugins = await PluginScanner.ScanAsync(SelectedFormats);
+            sw.Stop();
+
+            _pluginList.ItemsSource = plugins.Select(p => new PluginItem(p)).ToList();
+
+            int au = plugins.Count(p => p.Format == PluginFormat.AudioUnit);
+            int vst3 = plugins.Count - au;
+            _statusText.Text = $"Found {plugins.Count} plugin(s) – {vst3} VST3, {au} AU – in {sw.ElapsedMilliseconds} ms";
         }
         catch (Exception ex)
         {
@@ -185,8 +223,9 @@ public class MainWindow : Window
             // Create the wrapper – this also starts the dedicated plugin thread.
             _plugin = new ThreadedVst3Wrapper();
 
-            // LoadPlugin runs on the plugin thread; the UI thread is free during the await.
-            bool loaded = await _plugin.LoadPluginAsync(item.Path);
+            // Identifier is a bundle path for VST3 and an "AudioUnit:..." token for AU;
+            // LoadPluginAsync takes both. Runs on the plugin thread, UI stays free.
+            bool loaded = await _plugin.LoadPluginAsync(item.Identifier);
             if (!loaded)
             {
                 _statusText.Text = "Failed to load plugin.";
@@ -211,11 +250,12 @@ public class MainWindow : Window
             bool isEffect = await _plugin.GetIsEffectAsync();
             int paramCount = await _plugin.GetParameterCountAsync();
             bool hasEditor = await _plugin.HasEditorAsync();
+            PluginFormat? format = await _plugin.GetFormatAsync();
             // Editor size is only available after the editor window is opened.
             EditorSize? editorSize = null;
 
             // Back on the UI thread: update controls.
-            UpdatePluginInfo(name, vendor, version, isInstrument, isEffect, paramCount, editorSize);
+            UpdatePluginInfo(name, vendor, version, format, isInstrument, isEffect, paramCount, editorSize);
 
             _openEditorButton.IsEnabled = hasEditor;
             _playButton.IsEnabled = true;
@@ -304,7 +344,7 @@ public class MainWindow : Window
 
 
     // Helpers
-    private void UpdatePluginInfo(string name, string vendor, string? version,
+    private void UpdatePluginInfo(string name, string vendor, string? version, PluginFormat? format,
         bool isInstrument, bool isEffect, int paramCount, EditorSize? editorSize)
     {
         // Keep the fixed buttons (indices 0-3) and replace everything after them.
@@ -314,6 +354,7 @@ public class MainWindow : Window
         AddInfoLine("Name", name);
         AddInfoLine("Vendor", vendor);
         AddInfoLine("Version", version);
+        AddInfoLine("Format", format?.ToString());
         AddInfoLine("Type", isInstrument ? "Instrument" : (isEffect ? "Effect" : "Unknown"));
         AddInfoLine("Parameters", paramCount.ToString());
 
@@ -353,7 +394,24 @@ public class MainWindow : Window
 
 public class PluginItem
 {
-    public required string Path { get; set; }
-    public required string Name { get; set; }
-    public override string ToString() => Name;
+    public string Identifier { get; }
+    public string Name { get; }
+    public PluginFormat Format { get; }
+
+    public PluginItem(PluginDescriptor descriptor)
+    {
+        Identifier = descriptor.Identifier;
+        Name = descriptor.Name;
+        Format = descriptor.Format;
+    }
+
+    // Fallback path for pre-1.7.0 native libraries, where all we have is a file path.
+    public PluginItem(string vst3Path)
+    {
+        Identifier = vst3Path;
+        Name = Path.GetFileNameWithoutExtension(vst3Path);
+        Format = PluginFormat.Vst3;
+    }
+
+    public override string ToString() => $"{Name}   [{(Format == PluginFormat.AudioUnit ? "AU" : "VST3")}]";
 }
