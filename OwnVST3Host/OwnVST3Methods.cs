@@ -5,7 +5,7 @@ namespace OwnVST3Host
     /// <summary>
     /// C# wrapper for the OwnVst3 native library
     /// </summary>
-    public partial class OwnVst3Wrapper
+    public unsafe partial class OwnVst3Wrapper
     {
 #nullable disable warnings
         #region Public API methods
@@ -18,7 +18,10 @@ namespace OwnVST3Host
         public bool LoadPlugin(string pluginPath)
         {
             CheckDisposed();
-            return _loadPluginFunc(_pluginHandle, pluginPath);
+
+            byte* path = _toUtf8(pluginPath);
+            try { return _loadPluginFunc(_pluginHandle, path) != 0; }
+            finally { Marshal.FreeCoTaskMem((IntPtr)path); }
         }
 
         /// <summary>
@@ -29,7 +32,7 @@ namespace OwnVST3Host
         public bool CreateEditor(IntPtr windowHandle)
         {
             CheckDisposed();
-            return _createEditorFunc(_pluginHandle, windowHandle);
+            return _createEditorFunc(_pluginHandle, windowHandle) != 0;
         }
 
         /// <summary>
@@ -61,7 +64,12 @@ namespace OwnVST3Host
         public bool GetEditorSize(out int width, out int height)
         {
             CheckDisposed();
-            return _getEditorSizeFunc(_pluginHandle, out width, out height);
+
+            int w = 0, h = 0;
+            bool ok = _getEditorSizeFunc(_pluginHandle, &w, &h) != 0;
+            width = w;
+            height = h;
+            return ok;
         }
 
         /// <summary>
@@ -97,7 +105,7 @@ namespace OwnVST3Host
             CheckDisposed();
 
             VST3ParameterC paramC = new VST3ParameterC();
-            bool success = _getParameterAtFunc(_pluginHandle, index, ref paramC);
+            bool success = _getParameterAtFunc(_pluginHandle, index, &paramC) != 0;
 
             if (!success)
                 throw new ArgumentOutOfRangeException(nameof(index), "Invalid parameter index");
@@ -105,7 +113,7 @@ namespace OwnVST3Host
             return new VST3Parameter
             {
                 Id = paramC.id,
-                Name = Marshal.PtrToStringAnsi(paramC.name),
+                Name = Marshal.PtrToStringUTF8(paramC.name),
                 MinValue = paramC.minValue,
                 MaxValue = paramC.maxValue,
                 DefaultValue = paramC.defaultValue,
@@ -122,7 +130,7 @@ namespace OwnVST3Host
         public bool SetParameter(int paramId, double value)
         {
             CheckDisposed();
-            return _setParameterFunc(_pluginHandle, paramId, value);
+            return _setParameterFunc(_pluginHandle, paramId, value) != 0;
         }
 
         /// <summary>
@@ -137,36 +145,60 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Initializes the plugin and pre-allocates audio buffer handles to eliminate
-        /// per-callback heap allocations in ProcessAudio.
+        /// Initializes the plugin and lays out the planar scratch ProcessAudio hands it,
+        /// so the audio thread never allocates or pins. Safe to call again to grow the block.
         /// </summary>
         public bool Initialize(double sampleRate, int maxBlockSize)
         {
             CheckDisposed();
-            bool ok = _initializeFunc(_pluginHandle, sampleRate, maxBlockSize);
-            if (ok)
+
+            if (_initializeFunc(_pluginHandle, sampleRate, maxBlockSize) == 0)
+                return false;
+
+            _actualIn = ActualInputChannels;
+            _actualOut = ActualOutputChannels;
+
+            int channels = Math.Max(1, Math.Max(_actualIn, _actualOut));
+            if (channels != _preallocChannels || maxBlockSize != _preallocBlock)
+                _allocScratch(channels, maxBlockSize);
+
+            return true;
+        }
+
+        private unsafe void _allocScratch(int channels, int block)
+        {
+            _freeScratch();
+
+            nuint _ptrBytes = (nuint)channels * (nuint)sizeof(float*);
+            nuint _dataBytes = (nuint)channels * (nuint)block * sizeof(float);
+
+            _inPlanes = (float**)NativeMemory.Alloc(_ptrBytes);
+            _outPlanes = (float**)NativeMemory.Alloc(_ptrBytes);
+            _inData = (float*)NativeMemory.AlignedAlloc(_dataBytes, 64);
+            _outData = (float*)NativeMemory.AlignedAlloc(_dataBytes, 64);
+
+            NativeMemory.Clear(_inData, _dataBytes);
+            NativeMemory.Clear(_outData, _dataBytes);
+
+            for (int c = 0; c < channels; c++)
             {
-                int channels = Math.Max(ActualInputChannels, ActualOutputChannels);
-                if (channels != _preallocChannels)
-                {
-                    // Release previous pinned arrays before reallocating.
-                    if (_inputPtrsHandle.IsAllocated) _inputPtrsHandle.Free();
-                    if (_outputPtrsHandle.IsAllocated) _outputPtrsHandle.Free();
-
-                    _inputHandles = new GCHandle[channels];
-                    _outputHandles = new GCHandle[channels];
-                    _inputPtrs = new IntPtr[channels];
-                    _outputPtrs = new IntPtr[channels];
-
-                    // Pin the IntPtr arrays permanently — they are owned by this object
-                    // and their address is passed to native code on every ProcessAudio call.
-                    _inputPtrsHandle = GCHandle.Alloc(_inputPtrs, GCHandleType.Pinned);
-                    _outputPtrsHandle = GCHandle.Alloc(_outputPtrs, GCHandleType.Pinned);
-
-                    _preallocChannels = channels;
-                }
+                _inPlanes[c] = _inData + (nint)c * block;
+                _outPlanes[c] = _outData + (nint)c * block;
             }
-            return ok;
+
+            _preallocChannels = channels;
+            _preallocBlock = block;
+        }
+
+        private unsafe void _freeScratch()
+        {
+            if (_inPlanes != null) { NativeMemory.Free(_inPlanes); _inPlanes = null; }
+            if (_outPlanes != null) { NativeMemory.Free(_outPlanes); _outPlanes = null; }
+            if (_inData != null) { NativeMemory.AlignedFree(_inData); _inData = null; }
+            if (_outData != null) { NativeMemory.AlignedFree(_outData); _outData = null; }
+
+            _preallocChannels = 0;
+            _preallocBlock = 0;
         }
 
         /// <summary>
@@ -177,57 +209,49 @@ namespace OwnVST3Host
         /// <param name="numChannels">Number of channels</param>
         /// <param name="numSamples">Number of samples per channel</param>
         /// <returns>True if successful</returns>
-        public bool ProcessAudio(float[][] inputs, float[][] outputs, int numChannels, int numSamples)
+        public unsafe bool ProcessAudio(float[][] inputs, float[][] outputs, int numChannels, int numSamples)
         {
             CheckDisposed();
-
-            int actualIn = ActualInputChannels;
-            int actualOut = ActualOutputChannels;
 
             // The wider of the two buses, the same way Initialize preallocated. An instrument
             // has no input bus at all, and taking the narrower one made that a zero here - the
             // plugin was never called and every block came back silent.
-            int pluginChannels = Math.Min(numChannels, Math.Max(actualIn, actualOut));
-            pluginChannels = Math.Min(pluginChannels, _preallocChannels);
+            int _pluginChannels = Math.Min(numChannels, Math.Max(_actualIn, _actualOut));
+            _pluginChannels = Math.Min(_pluginChannels, _preallocChannels);
 
-            if (pluginChannels <= 0)
+            // No audio bus, or a block the scratch was not sized for: dry through, no rebuild
+            // here. Initialize() is where the buffers grow, and it is not audio-thread work.
+            if (_pluginChannels <= 0 || numSamples > _preallocBlock)
             {
-                // Plugin has no audio buses at all – simple pass-through.
-                int copyChannels = Math.Min(inputs.Length, outputs.Length);
-                for (int ch = 0; ch < copyChannels; ch++)
+                int _copyChannels = Math.Min(inputs.Length, outputs.Length);
+                for (int ch = 0; ch < _copyChannels; ch++)
                     inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
                 return false;
             }
 
-            var inputHandles = _inputHandles;
-            var outputHandles = _outputHandles;
-
-            for (int i = 0; i < pluginChannels; i++)
-            {
-                inputHandles[i] = GCHandle.Alloc(inputs[i], GCHandleType.Pinned);
-                outputHandles[i] = GCHandle.Alloc(outputs[i], GCHandleType.Pinned);
-                _inputPtrs[i] = inputHandles[i].AddrOfPinnedObject();
-                _outputPtrs[i] = outputHandles[i].AddrOfPinnedObject();
-            }
+            for (int ch = 0; ch < _pluginChannels; ch++)
+                inputs[ch].AsSpan(0, numSamples).CopyTo(new Span<float>(_inPlanes[ch], numSamples));
 
             AudioBufferC buffer = new AudioBufferC
             {
-                inputs = _inputPtrsHandle.AddrOfPinnedObject(),
-                outputs = _outputPtrsHandle.AddrOfPinnedObject(),
-                numChannels = pluginChannels,
+                inputs = (IntPtr)_inPlanes,
+                outputs = (IntPtr)_outPlanes,
+                numChannels = _pluginChannels,
                 numSamples = numSamples
             };
 
-            bool result = _processAudioFunc(_pluginHandle, ref buffer);
+            bool result = _processAudioFunc(_pluginHandle, &buffer) != 0;
 
-            for (int i = 0; i < pluginChannels; i++)
+            for (int ch = 0; ch < _pluginChannels; ch++)
             {
-                inputHandles[i].Free();
-                outputHandles[i].Free();
+                if (result)
+                    new Span<float>(_outPlanes[ch], numSamples).CopyTo(outputs[ch].AsSpan(0, numSamples));
+                else
+                    inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
             }
 
             // Pass-through any extra channels that the plugin did not process.
-            for (int ch = pluginChannels; ch < Math.Min(numChannels, outputs.Length); ch++)
+            for (int ch = _pluginChannels; ch < Math.Min(numChannels, outputs.Length); ch++)
                 inputs[ch].AsSpan(0, numSamples).CopyTo(outputs[ch]);
 
             return result;
@@ -240,37 +264,46 @@ namespace OwnVST3Host
         /// <param name="data1">First data byte (e.g. note number)</param>
         /// <param name="data2">Second data byte (e.g. velocity)</param>
         /// <returns>True if successful</returns>
-        public bool SendMidiEvent(byte status, byte data1, byte data2)
+        public unsafe bool SendMidiEvent(byte status, byte data1, byte data2)
         {
-            return ProcessMidi(new[] { new MidiEvent { Status = status, Data1 = data1, Data2 = data2 } });
+            CheckDisposed();
+
+            MidiEventC ev = new MidiEventC { status = status, data1 = data1, data2 = data2 };
+            return _processMidiFunc(_pluginHandle, &ev, 1) != 0;
         }
 
         /// <summary>
-        /// Processes MIDI events
+        /// Processes MIDI events. Marshalled through stack scratch in chunks — this runs on
+        /// the audio thread and a per-call array was straight gen0 churn.
         /// </summary>
-        /// <param name="events">MIDI events</param>
-        /// <returns>True if successful</returns>
-        public bool ProcessMidi(MidiEvent[] events)
+        public unsafe bool ProcessMidi(MidiEvent[] events)
         {
             CheckDisposed();
 
             if (events == null || events.Length == 0)
                 return false;
 
-            MidiEventC[] eventsC = new MidiEventC[events.Length];
+            const int _chunk = 128;
+            MidiEventC* scratch = stackalloc MidiEventC[_chunk];
+            bool ok = true;
 
-            for (int i = 0; i < events.Length; i++)
+            for (int start = 0; start < events.Length; start += _chunk)
             {
-                eventsC[i] = new MidiEventC
+                int n = Math.Min(_chunk, events.Length - start);
+
+                for (int i = 0; i < n; i++)
                 {
-                    status = events[i].Status,
-                    data1 = events[i].Data1,
-                    data2 = events[i].Data2,
-                    sampleOffset = events[i].SampleOffset
-                };
+                    MidiEvent e = events[start + i];
+                    scratch[i].status = e.Status;
+                    scratch[i].data1 = e.Data1;
+                    scratch[i].data2 = e.Data2;
+                    scratch[i].sampleOffset = e.SampleOffset;
+                }
+
+                ok &= _processMidiFunc(_pluginHandle, scratch, n) != 0;
             }
 
-            return _processMidiFunc(_pluginHandle, eventsC, events.Length);
+            return ok;
         }
 
         /// <summary>
@@ -282,7 +315,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _isMidiOnlyFunc?.Invoke(_pluginHandle) ?? false;
+                return _isMidiOnlyFunc != null && _isMidiOnlyFunc(_pluginHandle) != 0;
             }
         }
 
@@ -294,7 +327,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _isInstrumentFunc(_pluginHandle);
+                return _isInstrumentFunc(_pluginHandle) != 0;
             }
         }
 
@@ -306,7 +339,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _isEffectFunc(_pluginHandle);
+                return _isEffectFunc(_pluginHandle) != 0;
             }
         }
 
@@ -319,7 +352,7 @@ namespace OwnVST3Host
             {
                 CheckDisposed();
                 IntPtr namePtr = _getNameFunc(_pluginHandle);
-                return Marshal.PtrToStringAnsi(namePtr);
+                return Marshal.PtrToStringUTF8(namePtr);
             }
         }
 
@@ -332,7 +365,7 @@ namespace OwnVST3Host
             {
                 CheckDisposed();
                 IntPtr vendorPtr = _getVendorFunc(_pluginHandle);
-                return Marshal.PtrToStringAnsi(vendorPtr);
+                return Marshal.PtrToStringUTF8(vendorPtr);
             }
         }
 
@@ -347,7 +380,7 @@ namespace OwnVST3Host
                 if (_getVersionFunc == null)
                     return null; // Function not available in this version of the native library
                 IntPtr versionPtr = _getVersionFunc(_pluginHandle);
-                return Marshal.PtrToStringAnsi(versionPtr);
+                return Marshal.PtrToStringUTF8(versionPtr);
             }
         }
 
@@ -360,7 +393,7 @@ namespace OwnVST3Host
             {
                 CheckDisposed();
                 IntPtr infoPtr = _getPluginInfoFunc(_pluginHandle);
-                return Marshal.PtrToStringAnsi(infoPtr);
+                return Marshal.PtrToStringUTF8(infoPtr);
             }
         }
 
@@ -372,7 +405,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _getActualInputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
+                return _getActualInputChannelsFunc != null ? _getActualInputChannelsFunc(_pluginHandle) : 2;
             }
         }
 
@@ -384,7 +417,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _getActualOutputChannelsFunc?.Invoke(_pluginHandle) ?? 2;
+                return _getActualOutputChannelsFunc != null ? _getActualOutputChannelsFunc(_pluginHandle) : 2;
             }
         }
 
@@ -398,7 +431,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _getLatencySamplesFunc?.Invoke(_pluginHandle) ?? 0;
+                return _getLatencySamplesFunc != null ? _getLatencySamplesFunc(_pluginHandle) : 0;
             }
         }
 
@@ -408,7 +441,7 @@ namespace OwnVST3Host
         public void SetTempo(double bpm)
         {
             CheckDisposed();
-            _setTempoFunc?.Invoke(_pluginHandle, bpm);
+            if (_setTempoFunc != null) _setTempoFunc(_pluginHandle, bpm);
         }
 
         /// <summary>
@@ -417,7 +450,7 @@ namespace OwnVST3Host
         public void SetTransportState(bool isPlaying)
         {
             CheckDisposed();
-            _setTransportStateFunc?.Invoke(_pluginHandle, isPlaying);
+            if (_setTransportStateFunc != null) _setTransportStateFunc(_pluginHandle, isPlaying ? (byte)1 : (byte)0);
         }
 
         /// <summary>
@@ -430,7 +463,7 @@ namespace OwnVST3Host
         public void SetBypass(bool bypassed)
         {
             CheckDisposed();
-            _setBypassFunc?.Invoke(_pluginHandle, bypassed);
+            if (_setBypassFunc != null) _setBypassFunc(_pluginHandle, bypassed ? (byte)1 : (byte)0);
         }
 
         /// <summary>
@@ -439,7 +472,7 @@ namespace OwnVST3Host
         public void ResetTransportPosition()
         {
             CheckDisposed();
-            _resetTransportPositionFunc?.Invoke(_pluginHandle);
+            if (_resetTransportPositionFunc != null) _resetTransportPositionFunc(_pluginHandle);
         }
 
         /// <summary>
@@ -449,12 +482,15 @@ namespace OwnVST3Host
         {
             CheckDisposed();
             if (_getStateFunc == null || _freeStateDataFunc == null) return null;
-            if (!_getStateFunc(_pluginHandle, out IntPtr ptr, out int len) || ptr == IntPtr.Zero || len <= 0)
+
+            IntPtr ptr = IntPtr.Zero;
+            int len = 0;
+            if (_getStateFunc(_pluginHandle, &ptr, &len) == 0 || ptr == IntPtr.Zero || len <= 0)
                 return null;
             try
             {
                 byte[] result = new byte[len];
-                System.Runtime.InteropServices.Marshal.Copy(ptr, result, 0, len);
+                Marshal.Copy(ptr, result, 0, len);
                 return result;
             }
             finally
@@ -470,11 +506,9 @@ namespace OwnVST3Host
         {
             CheckDisposed();
             if (_setStateFunc == null || data == null || data.Length == 0) return false;
-            unsafe
-            {
-                fixed (byte* p = data)
-                    return _setStateFunc(_pluginHandle, (IntPtr)p, data.Length);
-            }
+
+            fixed (byte* p = data)
+                return _setStateFunc(_pluginHandle, p, data.Length) != 0;
         }
 
         /// <summary>
@@ -494,7 +528,7 @@ namespace OwnVST3Host
         public void ProcessIdle()
         {
             CheckDisposed();
-            _processIdleFunc?.Invoke(_pluginHandle);
+            if (_processIdleFunc != null) _processIdleFunc(_pluginHandle);
         }
 
         /// <summary>
@@ -508,7 +542,7 @@ namespace OwnVST3Host
             {
                 CheckDisposed();
                 if (_hasEditorFunc != null)
-                    return _hasEditorFunc(_pluginHandle);
+                    return _hasEditorFunc(_pluginHandle) != 0;
                 // Fallback for DLLs that pre-date VST3Plugin_HasEditor
                 return GetEditorSize(out _, out _);
             }
@@ -522,7 +556,7 @@ namespace OwnVST3Host
             get
             {
                 CheckDisposed();
-                return _isEditorOpenFunc?.Invoke(_pluginHandle) ?? false;
+                return _isEditorOpenFunc != null && _isEditorOpenFunc(_pluginHandle) != 0;
             }
         }
 

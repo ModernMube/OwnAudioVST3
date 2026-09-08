@@ -96,9 +96,6 @@ typedef struct {
 #define OWNPLUGIN_FORMAT_AUDIOUNIT  0x02
 #define OWNPLUGIN_FORMAT_ALL        0x7fffffff
 
-#define OWNPLUGIN_SCAN_FAST  0   /* metadata only, nothing is loaded */
-#define OWNPLUGIN_SCAN_FULL  1   /* loads every plugin, fills in channel counts */
-
 /** Scan modes for OwnPlugin_ScanStartMode(). */
 #define OWNPLUGIN_SCAN_FAST  0   /* registry / bundle metadata only, nothing is loaded */
 #define OWNPLUGIN_SCAN_FULL  1   /* loads every plugin — minutes, but fills in everything */
@@ -199,6 +196,9 @@ OWNVST3_API const char* OwnPlugin_GetIdentifier(VST3PluginHandle handle);
 /**
  * Prepares the plugin for audio processing.
  * Must be called after LoadPlugin() and before ProcessAudio()/ProcessMidi().
+ *
+ * Safe to call again on a running instance to grow maxBlockSize: it waits out any
+ * in-flight block and ProcessAudio() refuses blocks meanwhile rather than blocking.
  */
 OWNVST3_API bool VST3Plugin_Initialize(VST3PluginHandle handle, double sampleRate, int maxBlockSize);
 
@@ -264,6 +264,10 @@ OWNVST3_API double VST3Plugin_GetParameter(VST3PluginHandle handle, int paramId)
 /**
  * Processes one block of audio.  Must be called exclusively from the audio thread.
  * MIDI events accumulated via ProcessMidi() since the last call are consumed here.
+ *
+ * Returns false without touching the buffers when numSamples exceeds the maxBlockSize
+ * passed to Initialize(); the caller keeps its dry signal and re-initializes off the
+ * audio thread. Never allocates.
  */
 OWNVST3_API bool VST3Plugin_ProcessAudio(VST3PluginHandle handle, AudioBufferC* buffer);
 

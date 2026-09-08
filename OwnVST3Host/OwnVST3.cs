@@ -7,7 +7,7 @@ namespace OwnVST3Host
     /// <summary>
     /// C# wrapper for the OwnVst3 native library
     /// </summary>
-    public partial class OwnVst3Wrapper : IDisposable
+    public unsafe partial class OwnVst3Wrapper : IDisposable
     {
 #nullable disable warnings
         #region Private fields
@@ -21,51 +21,18 @@ namespace OwnVST3Host
         private const string LinuxLibraryName = "libownvst3.so";
         private const string MacOSLibraryName = "libownvst3.dylib";
 
-        // Function delegate instances
-        private VST3Plugin_CreateDelegate _createFunc;
-        private VST3Plugin_DestroyDelegate _destroyFunc;
-        private VST3Plugin_LoadPluginDelegate _loadPluginFunc;
-        private VST3Plugin_HasEditorDelegate? _hasEditorFunc;
-        private VST3Plugin_CreateEditorDelegate _createEditorFunc;
-        private VST3Plugin_CloseEditorDelegate _closeEditorFunc;
-        private VST3Plugin_ResizeEditorDelegate _resizeEditorFunc;
-        private VST3Plugin_GetEditorSizeDelegate _getEditorSizeFunc;
-        private VST3Plugin_GetParameterCountDelegate _getParameterCountFunc;
-        private VST3Plugin_GetParameterAtDelegate _getParameterAtFunc;
-        private VST3Plugin_SetParameterDelegate _setParameterFunc;
-        private VST3Plugin_GetParameterDelegate _getParameterFunc;
-        private VST3Plugin_InitializeDelegate _initializeFunc;
-        private VST3Plugin_ProcessAudioDelegate _processAudioFunc;
-        private VST3Plugin_ProcessMidiDelegate _processMidiFunc;
-        private VST3Plugin_IsInstrumentDelegate _isInstrumentFunc;
-        private VST3Plugin_IsEffectDelegate _isEffectFunc;
-        private VST3Plugin_IsMidiOnlyDelegate? _isMidiOnlyFunc;
-        private VST3Plugin_GetNameDelegate _getNameFunc;
-        private VST3Plugin_GetVendorDelegate _getVendorFunc;
-        private VST3Plugin_GetVersionDelegate? _getVersionFunc;
-        private VST3Plugin_GetPluginInfoDelegate _getPluginInfoFunc;
-        private VST3Plugin_ClearStringCacheDelegate _clearStringCacheFunc;
-        private VST3Plugin_ProcessIdleDelegate? _processIdleFunc;
-        private VST3Plugin_IsEditorOpenDelegate? _isEditorOpenFunc;
-        private VST3Plugin_GetActualInputChannelsDelegate? _getActualInputChannelsFunc;
-        private VST3Plugin_GetActualOutputChannelsDelegate? _getActualOutputChannelsFunc;
-        private VST3Plugin_GetLatencySamplesDelegate? _getLatencySamplesFunc;
-        private VST3Plugin_SetTempoDelegate? _setTempoFunc;
-        private VST3Plugin_SetTransportStateDelegate? _setTransportStateFunc;
-        private VST3Plugin_SetBypassDelegate? _setBypassFunc;
-        private VST3Plugin_ResetTransportPositionDelegate? _resetTransportPositionFunc;
-        private VST3Plugin_GetStateDelegate? _getStateFunc;
-        private VST3Plugin_SetStateDelegate? _setStateFunc;
-        private VST3Plugin_FreeStateDataDelegate? _freeStateDataFunc;
+        // Planar scratch the plugin reads and writes, off the GC heap entirely. Pinning
+        // the caller's float[] per block used to cost two GC handles per channel per
+        // block and fragmented gen0 for as long as playback ran.
+        private unsafe float** _inPlanes;
+        private unsafe float** _outPlanes;
+        private unsafe float*  _inData;
+        private unsafe float*  _outData;
+        private int _preallocChannels;
+        private int _preallocBlock;
 
-        
-        private GCHandle[] _inputHandles  = Array.Empty<GCHandle>();
-        private GCHandle[] _outputHandles = Array.Empty<GCHandle>();
-        private IntPtr[]   _inputPtrs     = Array.Empty<IntPtr>();
-        private IntPtr[]   _outputPtrs    = Array.Empty<IntPtr>();
-        private GCHandle   _inputPtrsHandle;   // permanently pinned IntPtr[]
-        private GCHandle   _outputPtrsHandle;  // permanently pinned IntPtr[]
-        private int        _preallocChannels;
+        private int _actualIn  = 2;
+        private int _actualOut = 2;
 
         #endregion
 
@@ -411,9 +378,7 @@ namespace OwnVST3Host
         {
             if (!_disposed)
             {
-                // Release the permanently-pinned IntPtr arrays before freeing the plugin.
-                if (_inputPtrsHandle.IsAllocated)  _inputPtrsHandle.Free();
-                if (_outputPtrsHandle.IsAllocated) _outputPtrsHandle.Free();
+                _freeScratch();
 
                 if (_pluginHandle != IntPtr.Zero)
                 {

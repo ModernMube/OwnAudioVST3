@@ -54,11 +54,9 @@ file static class Win32Pump
 /// Threading model:
 ///   Plugin thread  – dedicated Thread that runs all native VST operations (load, init,
 ///                    parameter reads, etc.). UI code posts commands here via PostCommand.
-///   Audio thread   – ProcessAudio() is called directly by the audio engine. Before each
-///                    block it drains the lock-free SPSC queue and applies any pending
-///                    state changes (SetParameter, SetTempo, …).
+///   Audio thread   – ProcessAudio() is called directly by the audio engine.
 ///   UI thread      – calls the async public methods; SetParameter/SetTempo/SetTransportState
-///                    enqueue to the SPSC queue and return immediately.
+///                    hand straight to the native host, which applies them on the next block.
 ///   Editor thread  – CreateEditor / CloseEditor MUST still be called on the caller (UI) thread
 ///                    as required by VST3 + macOS Cocoa. Use InnerWrapper for those via
 ///                    VstEditorController.
@@ -77,7 +75,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     private readonly Thread _pluginThread;
     private readonly ConcurrentQueue<Action> _cmdQueue = new();
     private readonly AutoResetEvent _cmdReady = new(false);
-    private readonly LockFreeQueue<VstStateChange> _stateQueue;
 
     private volatile bool _disposed;
 
@@ -123,7 +120,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     public ThreadedVst3Wrapper(string? dllPath = null)
     {
         _inner = dllPath != null ? new OwnVst3Wrapper(dllPath) : new OwnVst3Wrapper();
-        _stateQueue = new LockFreeQueue<VstStateChange>(512);
 
         _pluginThread = new Thread(PluginThreadProc)
         {
@@ -230,14 +226,10 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     #endregion
 
     /// <summary>
-    /// Sets a parameter value from the UI thread.
-    /// Applied on the audio thread before the next block (lock-free, ~11 ms latency at 44100/512).
+    /// Sets a parameter value from the UI thread. Goes straight into the native host's
+    /// lock-free queue, which the plugin drains on its next block.
     /// </summary>
-    public void SetParameter(int paramId, double value)
-    {
-        if (!_stateQueue.TryEnqueue(VstStateChange.ForParameter(paramId, value)))
-            Console.WriteLine($"[ThreadedVst3Wrapper] SPSC queue full — SetParameter({paramId}) dropped.");
-    }
+    public void SetParameter(int paramId, double value) => _inner.SetParameter(paramId, value);
 
     /// <summary>
     /// Sets a parameter value synchronously on the dedicated plugin thread.
@@ -257,37 +249,22 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         PostCommand(() => _inner.SetState(data));
 
     /// <summary>
-    /// Sets the playback tempo from the UI thread.
+    /// Playback tempo in BPM. Native atomic, lands on the next block.
     /// </summary>
-    public void SetTempo(double bpm)
-    {
-        if (!_stateQueue.TryEnqueue(VstStateChange.ForTempo(bpm)))
-            Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — SetTempo dropped.");
-    }
+    public void SetTempo(double bpm) => _inner.SetTempo(bpm);
 
     /// <summary>
-    /// Sets the transport playing state from the UI thread.
+    /// Transport play/stop flag.
     /// </summary>
-    public void SetTransportState(bool isPlaying)
-    {
-        if (!_stateQueue.TryEnqueue(VstStateChange.ForTransport(isPlaying)))
-            Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — SetTransportState dropped.");
-    }
+    public void SetTransportState(bool isPlaying) => _inner.SetTransportState(isPlaying);
 
     /// <summary>
-    /// Resets the transport position from the UI thread.
+    /// Rewinds the native transport sample counter.
     /// </summary>
-    public void ResetTransportPosition()
-    {
-        if (!_stateQueue.TryEnqueue(VstStateChange.ForResetTransport()))
-            Console.WriteLine("[ThreadedVst3Wrapper] SPSC queue full — ResetTransportPosition dropped.");
-    }
+    public void ResetTransportPosition() => _inner.ResetTransportPosition();
 
     /// <summary>
-    /// Enables or disables plugin bypass. Forwarded straight to the native host (a thread-safe atomic
-    /// flag read on the audio thread), not through this wrapper's managed state queue — so it applies
-    /// even when a native audio host (for example the Rust effect chain) drives ProcessAudio directly
-    /// and this wrapper's queue is never drained.
+    /// Enables or disables plugin bypass — an atomic flag the audio thread reads.
     /// </summary>
     public void SetBypass(bool bypassed) => _inner.SetBypass(bypassed);
 
@@ -321,7 +298,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
 
         try
         {
-            DrainStateQueue();
             return _inner.ProcessAudio(inputs, outputs, numChannels, numSamples);
         }
         finally
@@ -361,29 +337,6 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     #endregion
 
     #region Internal
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DrainStateQueue()
-    {
-        while (_stateQueue.TryDequeue(out var change))
-        {
-            switch (change.Type)
-            {
-                case VstChangeType.Parameter:
-                    _inner.SetParameter(change.IntArg, change.DoubleArg);
-                    break;
-                case VstChangeType.Tempo:
-                    _inner.SetTempo(change.DoubleArg);
-                    break;
-                case VstChangeType.TransportState:
-                    _inner.SetTransportState(change.IntArg != 0);
-                    break;
-                case VstChangeType.ResetTransport:
-                    _inner.ResetTransportPosition();
-                    break;
-            }
-        }
-    }
 
     private void PluginThreadProc()
     {
@@ -496,38 +449,4 @@ public sealed class ThreadedVst3Wrapper : IDisposable
         _cmdReady.Dispose();
         GC.SuppressFinalize(this);
     }
-}
-
-internal enum VstChangeType : byte
-{
-    Parameter,
-    Tempo,
-    TransportState,
-    ResetTransport
-}
-
-internal readonly struct VstStateChange
-{
-    public readonly VstChangeType Type;
-    public readonly int IntArg;
-    public readonly double DoubleArg;
-
-    private VstStateChange(VstChangeType type, int intArg, double doubleArg)
-    {
-        Type = type;
-        IntArg = intArg;
-        DoubleArg = doubleArg;
-    }
-
-    public static VstStateChange ForParameter(int paramId, double value) =>
-        new(VstChangeType.Parameter, paramId, value);
-
-    public static VstStateChange ForTempo(double bpm) =>
-        new(VstChangeType.Tempo, 0, bpm);
-
-    public static VstStateChange ForTransport(bool playing) =>
-        new(VstChangeType.TransportState, playing ? 1 : 0, 0.0);
-
-    public static VstStateChange ForResetTransport() =>
-        new(VstChangeType.ResetTransport, 0, 0.0);
 }

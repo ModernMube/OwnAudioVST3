@@ -2,7 +2,7 @@
 
 #include "JuceHeader.h"
 #include "EditorWindow.h"
-#include "SpscQueue.h"
+#include "MpscQueue.h"
 #include "StringCache.h"
 #include "../include/ownvst3_exports.h"
 
@@ -18,24 +18,11 @@
  */
 void ownvst3_ensureJuceInitialised();
 
-/** Tag for the kind of state change enqueued from the UI thread. */
-enum class StateChangeKind : uint8_t
+/** One pending parameter write, delivered lock-free to the audio thread. */
+struct ParamChange
 {
-    Parameter,
-    Tempo,
-    TransportState,
-    ResetTransport
-};
-
-/**
- * Payload for one enqueued state change.
- * Delivered lock-free from the UI thread to the audio thread via SpscQueue.
- */
-struct StateChange
-{
-    StateChangeKind kind;
-    int32_t         intArg;
-    double          doubleArg;
+    int32_t index;
+    float   value;
 };
 
 /**
@@ -133,11 +120,13 @@ public:
     void clearStringCache();
 
 private:
-    /**
-     * Drains the SPSC queue and applies all pending state changes.
-     * Called at the top of processAudio() before processBlock().
-     */
-    void drainStateQueue();
+    /** Drains the parameter queue, called at the top of processAudio(). */
+    void drainParamQueue();
+
+    /** The block work itself, run with the reconfigure guard held. */
+    bool processAudioBody(float** inputs, int numIn,
+                          float** outputs, int numOut,
+                          int numSamples);
 
     /**
      * Builds _paramPtrs and _indexToParamId after loadPlugin() succeeds.
@@ -174,8 +163,12 @@ private:
        next block. */
     std::atomic<bool>     _bypassed  { false  };
 
-    /* Lock-free queue: UI thread enqueues, audio thread drains */
-    SpscQueue<StateChange, 512> _stateQueue;
+    /* Lock-free queue: any thread enqueues, audio thread drains */
+    MpscQueue<ParamChange, 512> _paramQueue;
+
+    /* Raised while initialize() rebuilds the buffers processAudio() reads from */
+    std::atomic<bool> _reconfiguring { false };
+    std::atomic<int>  _inProcess     { 0     };
 
     /* Shared string storage for pointers returned across the P/Invoke boundary */
     StringCache _strings;

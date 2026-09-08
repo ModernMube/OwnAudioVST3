@@ -3,6 +3,7 @@
 #include "AudioUnitRegistry.h"
 
 #include <algorithm>
+#include <cstring>
 
 #if defined(_WIN32)
     #define NOMINMAX
@@ -67,8 +68,16 @@ float PluginScanner::progress() const noexcept
 
 const char* PluginScanner::currentItem() const
 {
-    std::lock_guard<std::mutex> lock(_mutex);
-    return _currentItem.c_str();
+    return _currentItem.data();
+}
+
+void PluginScanner::_setCurrentItem(const juce::String& text)
+{
+    const auto utf8 = text.toStdString();
+    const auto n = std::min(utf8.size(), _currentItem.size() - 1u);
+
+    _currentItem[n] = '\0';
+    std::memcpy(_currentItem.data(), utf8.data(), n);
 }
 
 bool PluginScanner::start(int formatMask, int mode)
@@ -87,7 +96,8 @@ bool PluginScanner::start(int formatMask, int mode)
         std::lock_guard<std::mutex> lock(_mutex);
         _list.clear();
         _entries.clear();
-        _currentItem.clear();
+        _retired.clear();
+        _setCurrentItem({});
     }
 
     _worker = std::thread(&PluginScanner::_scanWorker, this, formatMask, mode);
@@ -103,7 +113,7 @@ void PluginScanner::_scanWorker(int formatMask, int mode)
 
     {
         std::lock_guard<std::mutex> lock(_mutex);
-        _currentItem.clear();
+        _setCurrentItem({});
         _sortEntries();
     }
 
@@ -191,7 +201,7 @@ void PluginScanner::_fullScan(int formatMask)
 
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            _currentItem = jobs[i].identifier.toStdString();
+            _setCurrentItem(jobs[i].identifier);
         }
 
         juce::OwnedArray<juce::PluginDescription> found;
@@ -273,24 +283,13 @@ void PluginScanner::_addDescription(const juce::PluginDescription& desc)
 {
     _list.addType(desc);
 
-    const auto identifier = desc.fileOrIdentifier.toStdString();
+    auto identifier = desc.fileOrIdentifier.toStdString();
+    auto slot = std::make_unique<Entry>();
 
-    auto it = std::find_if(_entries.begin(), _entries.end(),
-                           [&](const auto& e) { return e->identifier == identifier; });
-
-    if (it == _entries.end())
-    {
-        _entries.push_back(std::make_unique<Entry>());
-        it = _entries.end() - 1;
-    }
-
-    auto& slot = *it;
-
-    slot->name       = desc.name.toStdString();
+    slot->name         = desc.name.toStdString();
     slot->vendor       = desc.manufacturerName.toStdString();
     slot->version      = desc.version.toStdString();
     slot->category     = desc.category.toStdString();
-    slot->identifier   = identifier;
     slot->formatName   = desc.pluginFormatName.toStdString();
     slot->isInstrument = desc.isInstrument ? 1 : 0;
     slot->numInputs    = desc.numInputChannels;
@@ -299,6 +298,22 @@ void PluginScanner::_addDescription(const juce::PluginDescription& desc)
 
     if (juce::File::isAbsolutePath(desc.fileOrIdentifier))
         slot->filePath = identifier;
+
+    slot->identifier = std::move(identifier);
+
+    auto it = std::find_if(_entries.begin(), _entries.end(),
+                           [&](const auto& e) { return e->identifier == slot->identifier; });
+
+    if (it == _entries.end())
+    {
+        _entries.push_back(std::move(slot));
+        return;
+    }
+
+    // A caller may still be reading the old entry's char pointers, so park it until the
+    // next scan rather than assigning over the strings underneath it.
+    _retired.push_back(std::move(*it));
+    *it = std::move(slot);
 }
 
 void PluginScanner::_sortEntries()
@@ -358,6 +373,7 @@ bool PluginScanner::restoreCache(const char* xml)
 void PluginScanner::_rebuildEntries(const juce::Array<juce::PluginDescription>& types)
 {
     _entries.clear();
+    _retired.clear();
 
     for (const auto& desc : types)
         _addDescription(desc);

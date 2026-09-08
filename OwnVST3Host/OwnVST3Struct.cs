@@ -5,7 +5,7 @@ namespace OwnVST3Host
     /// <summary>
     /// C# wrapper for the OwnVst3 native library
     /// </summary>
-    public partial class OwnVst3Wrapper
+    public unsafe partial class OwnVst3Wrapper
     {
         #region Native Structures
 

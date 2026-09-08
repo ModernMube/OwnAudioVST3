@@ -1,5 +1,7 @@
 #include "PluginInstance.h"
 
+#include <thread>
+
 #if defined(_WIN32)
     #define NOMINMAX
     #include <windows.h>
@@ -291,7 +293,13 @@ bool PluginInstance::loadPluginAt(const char* path, int subIndex)
 
 bool PluginInstance::initialize(double sampleRate, int blockSize)
 {
-    if (!_plugin) return false;
+    if (!_plugin || blockSize <= 0) return false;
+
+    // setSize() below frees the buffer processAudio() reads from, so park the audio
+    // thread on the flag and wait out whatever block is already in flight.
+    _reconfiguring.store(true, std::memory_order_release);
+    while (_inProcess.load(std::memory_order_acquire) != 0)
+        std::this_thread::yield();
 
     _sampleRate = sampleRate;
     _blockSize  = blockSize;
@@ -306,6 +314,7 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
     _juceBuffer.setSize(std::max(channels, 1), blockSize, false, true, false);
     _midiBuffer.ensureSize(static_cast<size_t>(blockSize));
 
+    _reconfiguring.store(false, std::memory_order_release);
     return true;
 }
 
@@ -449,11 +458,7 @@ bool PluginInstance::getParameterAt(int index, VST3ParameterC* outParam)
 
 void PluginInstance::setParameter(int paramId, double value)
 {
-    StateChange c;
-    c.kind      = StateChangeKind::Parameter;
-    c.intArg    = paramId;
-    c.doubleArg = value;
-    _stateQueue.tryEnqueue(c);
+    _paramQueue.tryEnqueue(ParamChange{ paramId, static_cast<float>(value) });
 }
 
 double PluginInstance::getParameter(int paramId) const
@@ -473,7 +478,29 @@ bool PluginInstance::processAudio(float** inputs,  int numIn,
     if (_disposed.load(std::memory_order_relaxed)) return false;
     if (!_plugin)                                   return false;
 
-    drainStateQueue();
+    if (_reconfiguring.load(std::memory_order_acquire))
+        return false;
+
+    _inProcess.fetch_add(1, std::memory_order_acq_rel);
+
+    const bool ok = _reconfiguring.load(std::memory_order_acquire)
+                  ? false
+                  : processAudioBody(inputs, numIn, outputs, numOut, numSamples);
+
+    _inProcess.fetch_sub(1, std::memory_order_release);
+    return ok;
+}
+
+bool PluginInstance::processAudioBody(float** inputs,  int numIn,
+                                      float** outputs, int numOut,
+                                      int numSamples)
+{
+    // Wider than initialize() prepared for would malloc below and overrun what
+    // prepareToPlay() promised the plugin. Refusing it is the only RT-safe answer.
+    if (numSamples <= 0 || numSamples > _blockSize)
+        return false;
+
+    drainParamQueue();
 
     const int pluginIn  = _plugin->getTotalNumInputChannels();
     const int pluginOut = _plugin->getTotalNumOutputChannels();
@@ -563,34 +590,16 @@ bool PluginInstance::processMidi(const MidiEventC* events, int count)
     return true;
 }
 
-/* ── State queue drain ───────────────────────────────────────────────────── */
+/* ── Parameter queue drain ───────────────────────────────────────────────── */
 
-void PluginInstance::drainStateQueue()
+void PluginInstance::drainParamQueue()
 {
-    StateChange c;
-    while (_stateQueue.tryDequeue(c))
+    ParamChange c;
+    while (_paramQueue.tryDequeue(c))
     {
-        switch (c.kind)
-        {
-        case StateChangeKind::Parameter:
-        {
-            const auto idx = static_cast<size_t>(c.intArg);
-            if (c.intArg >= 0 && idx < _paramPtrs.size() && _paramPtrs[idx])
-                _paramPtrs[idx]->setValue(static_cast<float>(c.doubleArg));
-            break;
-        }
-        case StateChangeKind::Tempo:
-            _bpm.store(c.doubleArg, std::memory_order_relaxed);
-            break;
-
-        case StateChangeKind::TransportState:
-            _playing.store(c.intArg != 0, std::memory_order_relaxed);
-            break;
-
-        case StateChangeKind::ResetTransport:
-            _samplePos.store(0, std::memory_order_relaxed);
-            break;
-        }
+        const auto idx = static_cast<size_t>(c.index);
+        if (c.index >= 0 && idx < _paramPtrs.size() && _paramPtrs[idx])
+            _paramPtrs[idx]->setValue(c.value);
     }
 }
 
@@ -598,20 +607,17 @@ void PluginInstance::drainStateQueue()
 
 void PluginInstance::setTempo(double bpm)
 {
-    StateChange c{ StateChangeKind::Tempo, 0, bpm };
-    _stateQueue.tryEnqueue(c);
+    _bpm.store(bpm, std::memory_order_relaxed);
 }
 
 void PluginInstance::setTransportState(bool playing)
 {
-    StateChange c{ StateChangeKind::TransportState, playing ? 1 : 0, 0.0 };
-    _stateQueue.tryEnqueue(c);
+    _playing.store(playing, std::memory_order_relaxed);
 }
 
 void PluginInstance::resetTransportPosition()
 {
-    StateChange c{ StateChangeKind::ResetTransport, 0, 0.0 };
-    _stateQueue.tryEnqueue(c);
+    _samplePos.store(0, std::memory_order_relaxed);
 }
 
 void PluginInstance::setBypass(bool bypassed)

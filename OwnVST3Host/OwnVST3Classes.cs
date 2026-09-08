@@ -52,9 +52,10 @@ namespace OwnVST3Host
     }
 
     /// <summary>
-    /// C# representation of a MIDI event
+    /// C# representation of a MIDI event. A struct, not a class — this travels the audio
+    /// thread and a heap object per note-on is exactly the churn we cannot have there.
     /// </summary>
-    public class MidiEvent
+    public struct MidiEvent
     {
         public byte Status { get; set; }
         public byte Data1 { get; set; }

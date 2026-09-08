@@ -6,24 +6,17 @@ namespace OwnVST3Host
     /// Format-aware extras: which format an instance ended up hosting, and loading
     /// by scanner identifier or bundle sub-index.
     /// </summary>
-    public partial class OwnVst3Wrapper
+    public unsafe partial class OwnVst3Wrapper
     {
-        // I1 because the native side returns C99 _Bool, not a 4-byte Win32 BOOL.
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_LoadPluginAtDelegate(IntPtr handle, [MarshalAs(UnmanagedType.LPUTF8Str)] string pluginPath, int subIndex);
-
-        private delegate IntPtr OwnPlugin_GetFormatNameDelegate(IntPtr handle);
-        private delegate IntPtr OwnPlugin_GetIdentifierDelegate(IntPtr handle);
-
-        private OwnPlugin_LoadPluginAtDelegate? _loadPluginAtFunc;
-        private OwnPlugin_GetFormatNameDelegate? _getFormatNameFunc;
-        private OwnPlugin_GetIdentifierDelegate? _getIdentifierFunc;
+        private delegate* unmanaged[Cdecl]<IntPtr, byte*, int, byte> _loadPluginAtFunc;
+        private delegate* unmanaged[Cdecl]<IntPtr, IntPtr> _getFormatNameFunc;
+        private delegate* unmanaged[Cdecl]<IntPtr, IntPtr> _getIdentifierFunc;
 
         private void _initFormatDelegates()
         {
-            _loadPluginAtFunc = TryGetDelegate<OwnPlugin_LoadPluginAtDelegate>("OwnPlugin_LoadPluginAt");
-            _getFormatNameFunc = TryGetDelegate<OwnPlugin_GetFormatNameDelegate>("OwnPlugin_GetFormatName");
-            _getIdentifierFunc = TryGetDelegate<OwnPlugin_GetIdentifierDelegate>("OwnPlugin_GetIdentifier");
+            _loadPluginAtFunc = (delegate* unmanaged[Cdecl]<IntPtr, byte*, int, byte>)_tryExport("OwnPlugin_LoadPluginAt");
+            _getFormatNameFunc = (delegate* unmanaged[Cdecl]<IntPtr, IntPtr>)_tryExport("OwnPlugin_GetFormatName");
+            _getIdentifierFunc = (delegate* unmanaged[Cdecl]<IntPtr, IntPtr>)_tryExport("OwnPlugin_GetIdentifier");
         }
 
         public bool LoadPlugin(PluginDescriptor plugin) => LoadPlugin(plugin.Identifier);
@@ -36,7 +29,9 @@ namespace OwnVST3Host
             if (_loadPluginAtFunc == null)
                 throw new NotSupportedException("This native library predates 1.7.0 and cannot address plugins inside a bundle.");
 
-            return _loadPluginAtFunc(_pluginHandle, pluginPath, subIndex);
+            byte* path = _toUtf8(pluginPath);
+            try { return _loadPluginAtFunc(_pluginHandle, path, subIndex) != 0; }
+            finally { Marshal.FreeCoTaskMem((IntPtr)path); }
         }
 
         /// <summary>Null on an older native library.</summary>

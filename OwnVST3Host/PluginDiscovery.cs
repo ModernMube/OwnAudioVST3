@@ -94,45 +94,23 @@ namespace OwnVST3Host
             public int reserved;
         }
 
-        // I1 because the native side returns C99 _Bool, not a 4-byte Win32 BOOL.
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_ScanStartModeDelegate(int formatMask, int mode);
-
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_ScanIsRunningDelegate();
-
-        private delegate float OwnPlugin_ScanProgressDelegate();
-        private delegate IntPtr OwnPlugin_ScanCurrentItemDelegate();
-        private delegate void OwnPlugin_ScanCancelDelegate();
-        private delegate int OwnPlugin_GetScannedCountDelegate();
-
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_GetScannedAtDelegate(int index, ref PluginDescriptorC descriptor);
-
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_ResolveDescriptorDelegate([MarshalAs(UnmanagedType.LPUTF8Str)] string identifier, ref PluginDescriptorC descriptor);
-
-        private delegate IntPtr OwnPlugin_GetScanCacheXmlDelegate();
-
-        [return: MarshalAs(UnmanagedType.I1)]
-        private delegate bool OwnPlugin_RestoreScanCacheXmlDelegate([MarshalAs(UnmanagedType.LPUTF8Str)] string xml);
-
+        // Raw Cdecl function pointers; every native bool is a one-byte C99 _Bool.
         private static readonly object _initLock = new object();
         private static bool _loaded;
         private static IntPtr _libraryHandle;
 
-        private static OwnPlugin_ScanStartModeDelegate? _scanStartFunc;
-        private static OwnPlugin_ScanIsRunningDelegate? _scanIsRunningFunc;
-        private static OwnPlugin_ScanProgressDelegate? _scanProgressFunc;
-        private static OwnPlugin_ScanCurrentItemDelegate? _scanCurrentItemFunc;
-        private static OwnPlugin_ScanCancelDelegate? _scanCancelFunc;
-        private static OwnPlugin_GetScannedCountDelegate? _getScannedCountFunc;
-        private static OwnPlugin_GetScannedAtDelegate? _getScannedAtFunc;
-        private static OwnPlugin_ResolveDescriptorDelegate? _resolveFunc;
-        private static OwnPlugin_GetScanCacheXmlDelegate? _getScanCacheXmlFunc;
-        private static OwnPlugin_RestoreScanCacheXmlDelegate? _restoreScanCacheXmlFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<int, int, byte> _scanStartFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<byte> _scanIsRunningFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<float> _scanProgressFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<IntPtr> _scanCurrentItemFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<void> _scanCancelFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<int> _getScannedCountFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<int, PluginDescriptorC*, byte> _getScannedAtFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<byte*, PluginDescriptorC*, byte> _resolveFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<IntPtr> _getScanCacheXmlFunc;
+        private static unsafe delegate* unmanaged[Cdecl]<byte*, byte> _restoreScanCacheXmlFunc;
 
-        private static void _ensureLoaded()
+        private static unsafe void _ensureLoaded()
         {
             if (_loaded) return;
 
@@ -142,29 +120,36 @@ namespace OwnVST3Host
 
                 _libraryHandle = NativeLibrary.Load(OwnVst3Wrapper.GetNativeLibraryPath());
 
-                _scanStartFunc = _bind<OwnPlugin_ScanStartModeDelegate>("OwnPlugin_ScanStartMode");
-                _scanIsRunningFunc = _bind<OwnPlugin_ScanIsRunningDelegate>("OwnPlugin_ScanIsRunning");
-                _scanProgressFunc = _bind<OwnPlugin_ScanProgressDelegate>("OwnPlugin_ScanProgress");
-                _scanCurrentItemFunc = _bind<OwnPlugin_ScanCurrentItemDelegate>("OwnPlugin_ScanCurrentItem");
-                _scanCancelFunc = _bind<OwnPlugin_ScanCancelDelegate>("OwnPlugin_ScanCancel");
-                _getScannedCountFunc = _bind<OwnPlugin_GetScannedCountDelegate>("OwnPlugin_GetScannedCount");
-                _getScannedAtFunc = _bind<OwnPlugin_GetScannedAtDelegate>("OwnPlugin_GetScannedAt");
-                _resolveFunc = _bind<OwnPlugin_ResolveDescriptorDelegate>("OwnPlugin_ResolveDescriptor");
-                _getScanCacheXmlFunc = _bind<OwnPlugin_GetScanCacheXmlDelegate>("OwnPlugin_GetScanCacheXml");
-                _restoreScanCacheXmlFunc = _bind<OwnPlugin_RestoreScanCacheXmlDelegate>("OwnPlugin_RestoreScanCacheXml");
+                _scanStartFunc = (delegate* unmanaged[Cdecl]<int, int, byte>)_bind("OwnPlugin_ScanStartMode");
+                _scanIsRunningFunc = (delegate* unmanaged[Cdecl]<byte>)_bind("OwnPlugin_ScanIsRunning");
+                _scanProgressFunc = (delegate* unmanaged[Cdecl]<float>)_bind("OwnPlugin_ScanProgress");
+                _scanCurrentItemFunc = (delegate* unmanaged[Cdecl]<IntPtr>)_bind("OwnPlugin_ScanCurrentItem");
+                _scanCancelFunc = (delegate* unmanaged[Cdecl]<void>)_bind("OwnPlugin_ScanCancel");
+                _getScannedCountFunc = (delegate* unmanaged[Cdecl]<int>)_bind("OwnPlugin_GetScannedCount");
+                _getScannedAtFunc = (delegate* unmanaged[Cdecl]<int, PluginDescriptorC*, byte>)_bind("OwnPlugin_GetScannedAt");
+                _resolveFunc = (delegate* unmanaged[Cdecl]<byte*, PluginDescriptorC*, byte>)_bind("OwnPlugin_ResolveDescriptor");
+                _getScanCacheXmlFunc = (delegate* unmanaged[Cdecl]<IntPtr>)_bind("OwnPlugin_GetScanCacheXml");
+                _restoreScanCacheXmlFunc = (delegate* unmanaged[Cdecl]<byte*, byte>)_bind("OwnPlugin_RestoreScanCacheXml");
 
                 _loaded = true;
             }
         }
 
-        private static T? _bind<T>(string name) where T : Delegate
+        private static unsafe void* _bind(string name)
         {
-            if (NativeLibrary.TryGetExport(_libraryHandle, name, out IntPtr ptr) && ptr != IntPtr.Zero)
-                return Marshal.GetDelegateForFunctionPointer<T>(ptr);
+            if (NativeLibrary.TryGetExport(_libraryHandle, name, out IntPtr ptr))
+                return (void*)ptr;
             return null;
         }
 
         private static string _utf8(IntPtr p) => p == IntPtr.Zero ? "" : Marshal.PtrToStringUTF8(p) ?? "";
+
+        // ScanAsync awaits, and an async method cannot be unsafe, so every pointer call it
+        // needs goes through one of these.
+        private static unsafe bool _supported => _scanStartFunc != null;
+        private static unsafe bool _start(int formats, int mode) => _scanStartFunc(formats, mode) != 0;
+        private static unsafe bool _running() => _scanIsRunningFunc != null && _scanIsRunningFunc() != 0;
+        private static unsafe float _progress() => _scanProgressFunc == null ? 1f : _scanProgressFunc();
 
         #endregion
 
@@ -176,7 +161,7 @@ namespace OwnVST3Host
             get
             {
                 _ensureLoaded();
-                return _scanStartFunc != null;
+                return _supported;
             }
         }
 
@@ -187,14 +172,14 @@ namespace OwnVST3Host
             get
             {
                 _ensureLoaded();
-                return _scanIsRunningFunc != null && _scanIsRunningFunc();
+                return _running();
             }
         }
 
-        public static void Cancel()
+        public static unsafe void Cancel()
         {
             _ensureLoaded();
-            _scanCancelFunc?.Invoke();
+            if (_scanCancelFunc != null) _scanCancelFunc();
         }
 
         /// <summary>
@@ -209,17 +194,17 @@ namespace OwnVST3Host
         {
             _ensureLoaded();
 
-            if (_scanStartFunc == null)
+            if (!_supported)
                 throw new NotSupportedException("This native library predates 1.7.0 and has no plugin scanner.");
 
-            if (!_scanStartFunc((int)formats, (int)mode))
+            if (!_start((int)formats, (int)mode))
                 throw new InvalidOperationException("A plugin scan is already running.");
 
             using (cancellationToken.Register(Cancel))
             {
-                while (_scanIsRunningFunc!())
+                while (_running())
                 {
-                    progress?.Report(new ScanProgress(_scanProgressFunc!(), CurrentItem, _count()));
+                    progress?.Report(new ScanProgress(_progress(), CurrentItem, _count()));
                     await Task.Delay(120, CancellationToken.None).ConfigureAwait(false);
                 }
             }
@@ -234,7 +219,7 @@ namespace OwnVST3Host
         /// Loads one plugin to fill in what a fast scan left out, and updates the cached
         /// entry. Takes as long as loading that plugin; returns null if it cannot be loaded.
         /// </summary>
-        public static Task<PluginDescriptor?> ResolveAsync(PluginDescriptor plugin,
+        public static unsafe Task<PluginDescriptor?> ResolveAsync(PluginDescriptor plugin,
                                                            CancellationToken cancellationToken = default)
         {
             _ensureLoaded();
@@ -242,14 +227,19 @@ namespace OwnVST3Host
             if (_resolveFunc == null)
                 throw new NotSupportedException("This native library predates 1.7.0.");
 
+            string identifier = plugin.Identifier;
+
             return Task.Run(() =>
             {
-                var raw = new PluginDescriptorC();
-                return _resolveFunc(plugin.Identifier, ref raw) ? _toDescriptor(ref raw) : null;
+                PluginDescriptorC raw = new PluginDescriptorC();
+                byte* id = (byte*)Marshal.StringToCoTaskMemUTF8(identifier);
+
+                try { return _resolveFunc(id, &raw) != 0 ? _toDescriptor(ref raw) : null; }
+                finally { Marshal.FreeCoTaskMem((IntPtr)id); }
             }, cancellationToken);
         }
 
-        public static string CurrentItem
+        public static unsafe string CurrentItem
         {
             get
             {
@@ -259,7 +249,7 @@ namespace OwnVST3Host
         }
 
         /// <summary>Result of the last scan or cache restore. Safe to call mid-scan.</summary>
-        public static IReadOnlyList<PluginDescriptor> GetResults()
+        public static unsafe IReadOnlyList<PluginDescriptor> GetResults()
         {
             _ensureLoaded();
             if (_getScannedAtFunc == null) return Array.Empty<PluginDescriptor>();
@@ -269,33 +259,35 @@ namespace OwnVST3Host
 
             for (int i = 0; i < count; i++)
             {
-                var raw = new PluginDescriptorC();
-                if (_getScannedAtFunc(i, ref raw)) { found.Add(_toDescriptor(ref raw)); }
+                PluginDescriptorC raw = new PluginDescriptorC();
+                if (_getScannedAtFunc(i, &raw) != 0) { found.Add(_toDescriptor(ref raw)); }
             }
 
             return found;
         }
 
         /// <summary>Persist this and feed it back to <see cref="RestoreCache"/> to skip a rescan.</summary>
-        public static string GetCacheXml()
+        public static unsafe string GetCacheXml()
         {
             _ensureLoaded();
             return _getScanCacheXmlFunc == null ? "" : _utf8(_getScanCacheXmlFunc());
         }
 
         /// <returns>False on malformed XML, or if a scan is in flight.</returns>
-        public static bool RestoreCache(string xml)
+        public static unsafe bool RestoreCache(string xml)
         {
             _ensureLoaded();
             if (_restoreScanCacheXmlFunc == null || string.IsNullOrWhiteSpace(xml))
                 return false;
 
-            return _restoreScanCacheXmlFunc(xml);
+            byte* raw = (byte*)Marshal.StringToCoTaskMemUTF8(xml);
+            try { return _restoreScanCacheXmlFunc(raw) != 0; }
+            finally { Marshal.FreeCoTaskMem((IntPtr)raw); }
         }
 
         #endregion
 
-        private static int _count() => _getScannedCountFunc == null ? 0 : _getScannedCountFunc();
+        private static unsafe int _count() => _getScannedCountFunc == null ? 0 : _getScannedCountFunc();
 
         private static PluginDescriptor _toDescriptor(ref PluginDescriptorC raw)
         {

@@ -3,6 +3,7 @@
 #include "JuceHeader.h"
 #include "../include/ownvst3_exports.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -39,7 +40,11 @@ private:
     PluginScanner() = default;
     ~PluginScanner();
 
-    /** Owns its strings so the C pointers handed across P/Invoke stay put. */
+    /**
+     * Owns its strings so the C pointers handed across P/Invoke stay put. Write-once:
+     * re-adding an identifier retires the old entry instead of assigning over strings
+     * a caller may still be reading.
+     */
     struct Entry
     {
         std::string name, vendor, version, category, identifier, formatName, filePath;
@@ -53,6 +58,7 @@ private:
     void _rebuildEntries(const juce::Array<juce::PluginDescription>& types);
     void _sortEntries();
     void _joinWorker();
+    void _setCurrentItem(const juce::String& text);
 
     static juce::PluginDescription _describeVst3Bundle(const juce::String& path);
     static void _copyOut(const Entry& e, PluginDescriptorC* out);
@@ -60,8 +66,12 @@ private:
     mutable std::mutex                   _mutex;
     juce::KnownPluginList                _list;
     std::vector<std::unique_ptr<Entry>>  _entries;
+    std::vector<std::unique_ptr<Entry>>  _retired;
     std::string                          _cacheXml;
-    std::string                          _currentItem;
+
+    /* Fixed buffer, not a std::string: currentItem() hands the pointer out and the scan
+       thread keeps writing. Reallocation under the reader is the part that crashes. */
+    std::array<char, 512>                _currentItem { '\0' };
 
     std::thread        _worker;
     std::atomic<bool>  _running   { false };
