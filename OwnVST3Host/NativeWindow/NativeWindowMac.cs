@@ -8,6 +8,7 @@ namespace OwnVST3Host.NativeWindow
     /// macOS native window management using Cocoa and Objective-C Runtime.
     /// Manages window creation, rendering, and thread synchronization.
     /// </summary>
+    [Obsolete("The native library creates and owns the editor window since 2.0; use VstEditorController.")]
     internal class NativeWindowMac : INativeWindow
     {
         /// <summary>

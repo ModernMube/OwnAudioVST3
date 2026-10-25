@@ -9,7 +9,7 @@
     <!-- NuGet packaging information -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>OwnAudioVst</PackageId>
-    <Version>1.7.0</Version>
+    <Version>2.0.0</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
     <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins, and AudioUnit plugins on macOS. Includes a background plugin scanner and cross-platform native editor support (Windows, macOS, Linux).</Description>
@@ -23,6 +23,7 @@
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />
     <None Include="icon.png" Pack="true" PackagePath="\" />
+    <None Include="..\THIRD_PARTY_NOTICES.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <!-- Native libraries for NuGet package -->

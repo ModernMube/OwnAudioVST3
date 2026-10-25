@@ -11,6 +11,7 @@ namespace OwnVST3Host.NativeWindow
     /// Provides cross-thread invocation capabilities for UI operations.
     /// X11 resources are exclusively managed on the event loop thread.
     /// </summary>
+    [Obsolete("The native library creates and owns the editor window since 2.0; use VstEditorController.")]
     internal class NativeWindowLinux : INativeWindow
     {
         /// <summary>

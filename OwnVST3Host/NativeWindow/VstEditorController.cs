@@ -4,15 +4,9 @@ using System.Threading.Tasks;
 namespace OwnVST3Host.NativeWindow
 {
     /// <summary>
-    /// Controller for managing a VST plugin editor window.
-    ///
-    /// On all platforms the JUCE native backend creates and owns its own window
-    /// (juce::DocumentWindow) when CreateEditor is called with IntPtr.Zero.
-    /// No C# native window wrapper is created — that would produce a second,
-    /// empty window alongside the plugin editor.
-    ///
-    /// JUCE's message pump (JuceMessageThread on Windows/Linux, GCD on macOS)
-    /// handles all UI dispatching internally, so no additional idle thread is needed.
+    /// Opens / closes a plugin editor. The native library creates and owns the window
+    /// (CreateEditor with IntPtr.Zero) and drives it from its own UI thread, so there is
+    /// no C# window and no idle thread here.
     /// </summary>
     public class VstEditorController : IDisposable
     {
@@ -20,7 +14,7 @@ namespace OwnVST3Host.NativeWindow
         private readonly Func<Task<EditorSize?>> _getEditorSizeAsync;
         private readonly ThreadedVst3Wrapper? _threadedWrapper;
 
-        private bool _juceOwnsWindow;
+        private bool _nativeOwnsWindow;
         private bool _disposed;
 
         /// <summary>
@@ -43,15 +37,14 @@ namespace OwnVST3Host.NativeWindow
             _getEditorSizeAsync = () => Task.FromResult(_vst3Wrapper.GetEditorSize());
         }
 
-        /// <summary>Gets a value indicating whether the JUCE editor window is currently open.</summary>
-        public bool IsOpen => _juceOwnsWindow;
+        /// <summary>Whether we opened the editor and have not closed it since.</summary>
+        public bool IsOpen => _nativeOwnsWindow;
 
         /// <summary>Gets a value indicating whether the editor is open.</summary>
         public bool IsEditorOpen => IsOpen;
 
         /// <summary>
-        /// Opens the VST editor synchronously.
-        /// JUCE creates and shows its own native window.
+        /// Opens the VST editor synchronously; the native library shows its own window.
         /// </summary>
         public void OpenEditor(string windowTitle)
         {
@@ -64,7 +57,7 @@ namespace OwnVST3Host.NativeWindow
 
         /// <summary>
         /// Opens the VST editor without blocking the UI thread.
-        /// Size is retrieved on the plugin thread before asking JUCE to create the window.
+        /// Size is retrieved on the plugin thread before the native window is created.
         /// </summary>
         public async Task OpenEditorAsync(string windowTitle)
         {
@@ -79,15 +72,11 @@ namespace OwnVST3Host.NativeWindow
         {
             try
             {
-                // Pass IntPtr.Zero on all platforms so JUCE creates and owns its own
-                // DocumentWindow. Passing a real handle here would still open a second
-                // window because JUCE always creates its own HWND/NSWindow/X11 window —
-                // the handle is only used on Windows to set the owner via SetWindowLongPtr,
-                // which does NOT embed the JUCE window; it just changes window ordering.
+                //We let the native side create its own top-level window; a handle here would only set the owner, not embed
                 if (!_vst3Wrapper.CreateEditor(IntPtr.Zero))
                     throw new InvalidOperationException("Failed to create VST editor.");
 
-                _juceOwnsWindow = true;
+                _nativeOwnsWindow = true;
             }
             catch
             {
@@ -101,9 +90,9 @@ namespace OwnVST3Host.NativeWindow
         /// </summary>
         public void CloseEditor()
         {
-            if (!_juceOwnsWindow) return;
+            if (!_nativeOwnsWindow) return;
 
-            _juceOwnsWindow = false;
+            _nativeOwnsWindow = false;
             try { _vst3Wrapper.CloseEditor(); }
             catch (Exception ex)
             { Console.WriteLine($"[VST Editor] Error closing editor: {ex.Message}"); }

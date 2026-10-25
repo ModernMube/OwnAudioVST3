@@ -451,17 +451,22 @@ protected override void OnClosed(EventArgs e)
 ### How the editor thread model works
 
 ```
-UI Thread                  Plugin Thread            Native Window Thread (Win) / Main Thread (Mac)
+Your UI Thread             Plugin Thread             Native UI thread (Win/Linux) / Main thread (macOS)
     │                           │                              │
     ├─ await GetEditorSizeAsync()─▶ GetEditorSize()            │
     │◀──────────────── size ────────┤                          │
-    ├─ NativeWindowFactory.Create() ──────────────────────────▶│
-    │                               Open(title, w, h)          │  (Win: STA message loop)
-    │◀───────────────────────────────────── handle ────────────┤  (Mac: dispatch_sync to main)
-    ├─ CreateEditor(handle)  ← runs on UI thread (VST3 requirement)
-    │
-    └─ StartIdleThread() → ProcessIdle at 50 Hz (via BeginInvoke on window thread)
+    ├─ CreateEditor(IntPtr.Zero) ──────────────────────────────▶ createView → window → attached → show
+    │                                                          │  (owns the window, the IPlugView and
+    │                                                          │   the plugin's idle / run loop)
+    └─ CloseEditor() ──────────────────────────────────────────▶ removed → window destroyed
 ```
+
+The native library creates and owns the editor window on every platform. On Windows and Linux
+that happens on a native thread with its own message / X11 event loop (STA, per-monitor DPI on
+Windows; `Linux::IRunLoop` for the plugin on Linux); on macOS on the main thread, which is never
+made to wait for another thread. There is no idle to drive from C# — `ProcessIdle()` is kept only
+for compatibility and does nothing. Closing the window with its title-bar button is noticed by the
+native side: `IsEditorOpen` turns false on its own.
 
 ---
 
@@ -503,9 +508,9 @@ await plugin.LoadPluginAsync(all[0]);
 
 ### Fast vs. full scans
 
-`ScanMode.Fast` (the default) reads only metadata that costs nothing: the macOS AudioComponent registry for AUs, bundle names for VST3. No plugin is loaded, so a machine with hundreds of plugins scans in a fraction of a second. The price is that `InputChannels` and `OutputChannels` come back as `-1` — getting those means loading the plugin.
+`ScanMode.Fast` (the default) reads only metadata that costs nothing: the macOS AudioComponent registry for AUs, and for VST3 the bundle's `moduleinfo.json` when it ships one (name, vendor, category, instrument flag — otherwise just the bundle name). No plugin is loaded, so a machine with hundreds of plugins scans in a fraction of a second. The price is that `InputChannels` and `OutputChannels` come back as `-1` — getting those means loading the plugin.
 
-`ScanMode.Full` does load every plugin, which is what JUCE's own scanning does and why DAW plugin scans take minutes. Use it only if you genuinely need channel counts for the entire list up front, and cache the result:
+`ScanMode.Full` does load every plugin (on the UI thread, as VST3 requires), which is why DAW plugin scans take minutes. Use it only if you genuinely need channel counts for the entire list up front, and cache the result:
 
 ```csharp
 var progress = new Progress<ScanProgress>(p =>

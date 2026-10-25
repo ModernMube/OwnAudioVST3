@@ -454,11 +454,9 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Enables or disables plugin bypass. When bypassed, the plugin is still driven every block
-        /// (so it never goes cold) but runs through JUCE's processBlockBypassed(), which passes the
-        /// input through delayed by the plugin's own latency — so toggling bypass introduces no time
-        /// shift relative to the processed output. Safe to call from any thread; applied on the next
-        /// audio block.
+        /// Enables or disables plugin bypass. The plugin keeps running every block; its own bypass
+        /// parameter is used when it has one, otherwise the input comes out delayed by the plugin's
+        /// latency, so toggling never shifts the timing. Any thread, applied on the next block.
         /// </summary>
         public void SetBypass(bool bypassed)
         {

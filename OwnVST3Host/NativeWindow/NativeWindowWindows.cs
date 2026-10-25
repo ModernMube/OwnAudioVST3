@@ -17,6 +17,7 @@ namespace OwnVST3Host.NativeWindow
     /// Cross-thread Invoke/BeginInvoke calls post a WM_USER_INVOKE message to the
     /// window thread; the WndProc drains the invoke queue and executes the actions.
     /// </summary>
+    [Obsolete("The native library creates and owns the editor window since 2.0; use VstEditorController.")]
     internal class NativeWindowWindows : INativeWindow
     {
         private IntPtr _hwnd = IntPtr.Zero;

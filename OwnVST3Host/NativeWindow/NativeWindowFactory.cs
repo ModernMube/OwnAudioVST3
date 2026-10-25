@@ -6,6 +6,7 @@ namespace OwnVST3Host.NativeWindow
     /// <summary>
     /// Factory class for instantiating platform-specific native windows.
     /// </summary>
+    [Obsolete("The native library creates and owns the editor window since 2.0; use VstEditorController.")]
     public static class NativeWindowFactory
     {
         /// <summary>

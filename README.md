@@ -4,7 +4,7 @@
   <img src="Ownaudiologo.png" alt="OwnAudio Logo" width="600"/>
 </p>
 
-A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on macOS, Audio Units as well. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is powered by [JUCE](https://juce.com/), providing broad plugin compatibility across all supported platforms.
+A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on macOS, Audio Units as well. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is a thin host built directly on the MIT-licensed [Steinberg VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) and Apple's AudioToolbox — no JUCE, every dependency MIT-compatible (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
 [![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnVst3Host/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -17,7 +17,7 @@ A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on ma
 - **Full VST3 support** — instruments, effects, MIDI-only plugins, parameter automation, transport context
 - **Audio Unit support on macOS** — AUv2 `.component` bundles alongside VST3, through the same API
 - **Sub-second plugin scanner** — finds VST3 bundles *and* registry-only AudioUnits without loading them; opt into a full scan when you need channel counts
-- **Cross-platform native editors** — Win32 (STA), Cocoa (GCD main thread), X11 (dedicated event loop)
+- **Cross-platform native editors** — the native library creates and owns the editor window: a dedicated STA thread with its own message loop on Windows, the main thread on macOS, an X11 event-loop thread on Linux
 - **Zero allocation audio path** — pre-pinned buffers, no heap allocation inside `ProcessAudio`
 - **Queryable plugin state** — `NotLoaded → Loaded → Ready ↔ Processing | Error`
 - **Automatic platform detection** — native library resolved at runtime for `win-x64`, `osx-arm64`, `linux-x64` and more
@@ -143,9 +143,9 @@ plugin.ProcessAudio(inputs, outputs, channels, samples);
 
 | Platform | Architecture | Formats | Window backend |
 |---|---|---|---|
-| Windows | x64, x86, ARM64 | VST3 | Win32 STA thread + message loop |
-| macOS | x64, ARM64 | VST3, AudioUnit | Cocoa via GCD (`dispatch_sync` to main thread) |
-| Linux | x64, ARM64 | VST3 | X11 dedicated event loop thread |
+| Windows | x64, x86, ARM64 | VST3 | native STA thread + message loop, per-monitor DPI |
+| macOS | x64, ARM64 | VST3, AudioUnit | main thread (GCD), never blocked |
+| Linux | x64, ARM64 | VST3 | native X11 event-loop thread with `Linux::IRunLoop` |
 
 Native libraries are resolved automatically from `runtimes/{rid}/native/` at runtime.
 
@@ -162,22 +162,21 @@ OwnAudioVST3/
 │   ├── PluginDiscovery.cs          # PluginScanner, PluginDescriptor, PluginFormat
 │   ├── LockFreeQueue.cs            # SPSC ring buffer (UI → audio thread)
 │   └── NativeWindow/
-│       ├── INativeWindow.cs        # Platform-agnostic window interface
-│       ├── NativeWindowWindows.cs  # Win32 STA window with message loop
-│       ├── NativeWindowMac.cs      # Cocoa/GCD main-thread marshalling
-│       ├── NativeWindowLinux.cs    # X11 event loop thread
-│       ├── NativeWindowFactory.cs  # Runtime platform selector
-│       └── VstEditorController.cs  # Editor lifecycle manager
-├── OwnVST3Juce/          # Native JUCE-based backend (C++)
-│   ├── CMakeLists.txt              # Cross-platform build definition
-│   ├── include/ownvst3_exports.h   # C ABI exported by the native library
-│   └── src/
-│       ├── PluginInstance.cpp/h    # JUCE AudioPluginInstance host wrapper
-│       ├── PluginScanner.cpp/h     # Background VST3 + AudioUnit discovery
-│       ├── EditorWindow.cpp/h      # Native plugin editor window management
-│       ├── Exports.cpp             # P/Invoke entry points
-│       ├── SpscQueue.h             # Lock-free parameter queue
-│       └── StringCache.cpp/h       # Thread-safe string interning
+│       ├── VstEditorController.cs  # Editor lifecycle manager
+│       └── NativeWindow*.cs        # Legacy C#-side windows (unused since the native library owns the window)
+├── OwnVST3Native/        # Native backend (C++, VST3 SDK + AudioToolbox, no JUCE)
+│   ├── CMakeLists.txt              # Fetches VST3 SDK 3.8.1 + pugixml, builds libownvst3
+│   ├── include/ownvst3_exports.h   # C ABI exported by the native library (frozen)
+│   ├── src/
+│   │   ├── Exports.cpp             # P/Invoke entry points
+│   │   ├── core/                   # PluginInstance, IPluginBackend, StateCodec, queues, delay line
+│   │   ├── vst3/                   # VST3 backend, host context, MIDI → VST3 / IMidiMapping
+│   │   ├── au/                     # AudioUnit backend (macOS), component registry
+│   │   ├── scan/                   # Scanner, moduleinfo.json, plugin-cache.xml
+│   │   └── ui/                     # UI thread + editor window per platform (win32 / mac / linux)
+│   └── tests/NativeTests.cpp       # Native unit tests
+├── OwnVST3Tests/         # MSTest API tests + golden files recorded with the 1.7.0 build
+├── OwnVST3Juce/          # Previous JUCE backend, kept for rollback until the editor checklist is signed off
 ├── runtimes/             # Pre-built native libraries per RID
 │   ├── win-x64/native/ownvst3.dll
 │   ├── win-x86/native/ownvst3.dll
@@ -205,7 +204,36 @@ dotnet build OwnVST3Host/OwnVST3Host.csproj --configuration Release
 dotnet run --project OwnVST3EditorDemo
 ```
 
-> **Native library**: Pre-built binaries for all platforms are included under `runtimes/`. To rebuild the C++ JUCE backend from source, see `OwnVST3Juce/CMakeLists.txt` — JUCE 8+ and CMake 3.22+ are required.
+> **Native library**: Pre-built binaries for all platforms are included under `runtimes/`. To rebuild the native backend you need CMake 3.22+ and a C++17 compiler; the VST3 SDK and pugixml are fetched at configure time:
+>
+> ```bash
+> cmake -S OwnVST3Native -B OwnVST3Native/build -DCMAKE_BUILD_TYPE=Release
+> cmake --build OwnVST3Native/build --config Release
+> ```
+>
+> Linux needs `libx11-dev`, nothing else.
+
+---
+
+## Testing
+
+```bash
+# Native unit tests (state codec, cache XML, MIDI mapping, delay line, queues)
+cmake -S OwnVST3Native -B OwnVST3Native/build -DOWNVST3_BUILD_TESTS=ON
+cmake --build OwnVST3Native/build --config Release
+ctest --test-dir OwnVST3Native/build -C Release
+
+# The VST3 SDK sample plugins the API tests load (MIT, built locally, VSTGUI off)
+cmake -S OwnVST3Native/build/_deps/vst3sdk-src -B OwnVST3Native/build-plugins -DCMAKE_BUILD_TYPE=Release \
+      -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
+cmake --build OwnVST3Native/build-plugins --config Release \
+      --target adelay again-sample-accurate mda-vst3 sync-delay legacy-midicc-out utf16-name
+
+# C# API tests against the library you just built
+OWNVST3_NATIVE_LIB=$PWD/OwnVST3Native/build/libownvst3.dylib dotnet test OwnVST3Tests
+```
+
+`OwnVST3Tests/Golden/` holds what the JUCE-based 1.7.0 build reported for every sample plugin and a few Apple AudioUnits — names, parameter order and defaults, channels, latency, a rendered block, a saved state. The tests hold the current build to it. `OWNVST3_RECORD_GOLDEN=1` rewrites the files. CI runs all of this on Windows x64, macOS and Linux x64.
 
 ---
 
@@ -246,6 +274,6 @@ MIT License — see [LICENSE.txt](LICENSE.txt) for details.
 
 ## Acknowledgments
 
-- Native plugin hosting powered by [JUCE](https://juce.com/)
+- Plugin hosting built on the [Steinberg VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) (MIT) and [pugixml](https://pugixml.org/) (MIT)
 - UI rendering powered by [Avalonia UI](https://avaloniaui.net/)
 - Issues and contributions: [GitHub Issues](https://github.com/ModernMube/OwnVST3Sharp/issues)

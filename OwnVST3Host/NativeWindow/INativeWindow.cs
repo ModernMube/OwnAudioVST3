@@ -6,6 +6,7 @@ namespace OwnVST3Host.NativeWindow
     /// Interface for native window management for VST3 plugins.
     /// Platform-independent abstraction for Windows, macOS and Linux.
     /// </summary>
+    [Obsolete("The native library creates and owns the editor window since 2.0; use VstEditorController.")]
     public interface INativeWindow : IDisposable
     {
         /// <summary>
