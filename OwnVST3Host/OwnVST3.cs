@@ -116,48 +116,48 @@ namespace OwnVST3Host
         }
 
         /// <summary>
-        /// Gets the full path to the native library for the current platform.
-        /// Searches in the following locations:
-        /// 1. runtimes/{rid}/native/ relative to the assembly location
-        /// 2. runtimes/{rid}/native/ relative to the current directory
-        /// 3. Current directory
+        /// Full path to the native library. Looks next to the assembly, then the app's base
+        /// directory (single-file builds leave Assembly.Location empty), the .app bundle's
+        /// Frameworks folder and finally the current directory.
         /// </summary>
-        /// <returns>Full path to the native library</returns>
         public static string GetNativeLibraryPath()
         {
             string rid = GetRuntimeIdentifier();
             string libraryName = GetNativeLibraryName();
 
-            // Get assembly location
-            string assemblyLocation = Path.GetDirectoryName(typeof(OwnVst3Wrapper).Assembly.Location) ?? "";
-
-            // Search paths in order of priority
-            string[] searchPaths = new[]
+            var _paths = new List<string>();
+            foreach (string _dir in _libraryFolders())
             {
-                // Relative to assembly location
-                Path.Combine(assemblyLocation, "runtimes", rid, "native", libraryName),
-                // Relative to current directory
-                Path.Combine(Directory.GetCurrentDirectory(), "runtimes", rid, "native", libraryName),
-                // Direct in assembly location
-                Path.Combine(assemblyLocation, libraryName),
-                // Direct in current directory
-                Path.Combine(Directory.GetCurrentDirectory(), libraryName)
-            };
-
-            foreach (string path in searchPaths)
-            {
-                if (File.Exists(path))
-                {
-                    return path;
-                }
+                _paths.Add(Path.Combine(_dir, "runtimes", rid, "native", libraryName));
+                if (rid.StartsWith("osx")) _paths.Add(Path.Combine(_dir, "runtimes", "osx", "native", libraryName));
+                _paths.Add(Path.Combine(_dir, libraryName));
             }
 
-            // If not found, return the expected path for a better error message
-            string expectedPath = Path.Combine(assemblyLocation, "runtimes", rid, "native", libraryName);
+            foreach (string path in _paths)
+                if (File.Exists(path)) return path;
+
             throw new DllNotFoundException(
-                $"Native library not found. Expected location: {expectedPath}\n" +
+                $"Native library not found: {libraryName}\n" +
                 $"Runtime identifier: {rid}\n" +
-                $"Searched paths:\n - {string.Join("\n - ", searchPaths)}");
+                $"Searched paths:\n - {string.Join("\n - ", _paths)}");
+        }
+
+        private static IEnumerable<string> _libraryFolders()
+        {
+            string baseDir = AppContext.BaseDirectory;
+
+            var folders = new List<string>
+            {
+                Path.GetDirectoryName(typeof(OwnVst3Wrapper).Assembly.Location) ?? "",
+                baseDir
+            };
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                folders.Add(Path.Combine(baseDir, "..", "Frameworks"));
+            folders.Add(Directory.GetCurrentDirectory());
+
+            return folders.Where(d => d.Length > 0)
+                          .Select(Path.GetFullPath)
+                          .Distinct();
         }
 
         /// <summary>
