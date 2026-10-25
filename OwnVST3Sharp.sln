@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3Host", "OwnVST3Host\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3EditorDemo", "OwnVST3EditorDemo\OwnVST3EditorDemo.csproj", "{65EDBA22-7500-4670-AA3C-77E942ED442E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OwnVST3Tests", "OwnVST3Tests\OwnVST3Tests.csproj", "{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -41,6 +43,18 @@ Global
 		{65EDBA22-7500-4670-AA3C-77E942ED442E}.Release|x64.Build.0 = Release|Any CPU
 		{65EDBA22-7500-4670-AA3C-77E942ED442E}.Release|x86.ActiveCfg = Release|Any CPU
 		{65EDBA22-7500-4670-AA3C-77E942ED442E}.Release|x86.Build.0 = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|x64.Build.0 = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Debug|x86.Build.0 = Debug|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|x64.ActiveCfg = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|x64.Build.0 = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|x86.ActiveCfg = Release|Any CPU
+		{2C26D956-3C8A-4BD1-95A0-4684ED3FEC70}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<KNOWNPLUGINS>
+  <PLUGIN name="SyncDelay" format="VST3" category="Fx|Delay" manufacturer="Steinberg Media Technologies"
+          version="3.8.1.0" file="/Library/Audio/Plug-Ins/VST3/sync-delay.vst3"
+          uniqueId="7ee47e3f" isInstrument="0" fileTime="1a173f4f147" infoUpdateTime="1a174100368"
+          numInputs="0" numOutputs="0" isShell="0" hasARAExtension="0"
+          uid="9046ce26"/>
+  <PLUGIN name="ADelay" format="VST3" category="Fx|Delay" manufacturer="Steinberg Media Technologies"
+          version="3.8.1.0" file="/Library/Audio/Plug-Ins/VST3/adelay.vst3"
+          uniqueId="fed6ff1a" isInstrument="0" fileTime="1a173f4f12d" infoUpdateTime="1a174100368"
+          numInputs="0" numOutputs="0" isShell="0" hasARAExtension="0"
+          uid="777bacbf"/>
+</KNOWNPLUGINS>
