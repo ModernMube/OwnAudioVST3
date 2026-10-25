@@ -6,7 +6,7 @@
 
 A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on macOS, Audio Units as well. Built for audio applications where the UI thread, the audio thread, and the plugin's native runtime must never block each other. The native backend is a thin host built directly on the MIT-licensed [Steinberg VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) and Apple's AudioToolbox — no JUCE, every dependency MIT-compatible (see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
-[![NuGet](https://img.shields.io/nuget/v/OwnVst3Host.svg)](https://www.nuget.org/packages/OwnAudioVst)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/OwnAudioVst)](https://www.nuget.org/packages/OwnAudioVst)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---
