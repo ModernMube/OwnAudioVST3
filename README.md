@@ -176,7 +176,6 @@ OwnAudioVST3/
 │   │   └── ui/                     # UI thread + editor window per platform (win32 / mac / linux)
 │   └── tests/NativeTests.cpp       # Native unit tests
 ├── OwnVST3Tests/         # MSTest API tests + golden files recorded with the 1.7.0 build
-├── OwnVST3Juce/          # Previous JUCE backend, kept for rollback until the editor checklist is signed off
 ├── runtimes/             # Pre-built native libraries per RID
 │   ├── win-x64/native/ownvst3.dll
 │   ├── win-x86/native/ownvst3.dll
