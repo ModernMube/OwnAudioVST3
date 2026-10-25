@@ -177,10 +177,18 @@ namespace OwnVST3Tests
         [TestMethod]
         public async Task SecondScanWhileRunningIsRejected()
         {
-            var _first = PluginScanner.ScanAsync(PluginFormat.Vst3, ScanMode.Fast);
-            if (PluginScanner.IsScanning)
-                await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => PluginScanner.ScanAsync(PluginFormat.Vst3, ScanMode.Fast));
+            // Only a full AU scan (it instantiates every Apple unit) is slow enough to be caught in the act;
+            // a fast scan on an empty CI machine is over before the next line runs.
+            if (!OperatingSystem.IsMacOS()) Assert.Inconclusive("needs a scan that takes a while");
+
+            var _first = PluginScanner.ScanAsync(PluginFormat.AudioUnit, ScanMode.Full);
+            if (!PluginScanner.IsScanning) Assert.Inconclusive("the scan was over immediately");
+
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => PluginScanner.ScanAsync(PluginFormat.Vst3, ScanMode.Fast));
+
+            PluginScanner.Cancel();
             await _first;
+            Assert.IsFalse(PluginScanner.IsScanning);
         }
     }
 }
