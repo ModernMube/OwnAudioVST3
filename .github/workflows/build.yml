@@ -131,23 +131,35 @@ jobs:
           sudo apt-get update || true
           sudo apt-get install -y libx11-dev:arm64
 
-      # ── FetchContent cache: VST3 SDK + pugixml ────────────────────────────
-      - name: Cache dependencies
+      # ── Dependency sources (VST3 SDK + pugixml), cached outside the build tree ─
+      # Only sources are cached: a FetchContent build tree carries the generator
+      # platform with it and must never travel between RIDs.
+      - name: Cache dependency sources
+        id: deps-cache
         uses: actions/cache@v4
         with:
-          path: OwnVST3Native/build/_deps
-          key: deps-vst3sdk-3.8.1_84-pugixml-1.15-${{ runner.os }}-${{ matrix.rid }}
-          restore-keys: |
-            deps-vst3sdk-3.8.1_84-pugixml-1.15-${{ runner.os }}-
+          path: .deps
+          key: src-vst3sdk-3.8.1_84-pugixml-1.15-${{ runner.os }}
+
+      - name: Fetch dependency sources
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v3.8.1_build_84 https://github.com/steinbergmedia/vst3sdk.git .deps/vst3sdk
+          git -C .deps/vst3sdk submodule update --init --depth 1 base pluginterfaces public.sdk cmake
+          git clone --depth 1 --branch v1.15 https://github.com/zeux/pugixml.git .deps/pugixml
 
       # ── CMake configure ───────────────────────────────────────────────────
       - name: Configure CMake
         shell: bash
-        run: >-
-          cmake -S OwnVST3Native -B OwnVST3Native/build
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DOWNVST3_BUILD_TESTS=${{ matrix.native_tests && 'ON' || 'OFF' }}
-          ${{ matrix.cmake_args }}
+        run: |
+          DEPS="$(pwd -W 2>/dev/null || pwd)/.deps"
+          cmake -S OwnVST3Native -B OwnVST3Native/build \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DOWNVST3_BUILD_TESTS=${{ matrix.native_tests && 'ON' || 'OFF' }} \
+            -DFETCHCONTENT_SOURCE_DIR_VST3SDK="$DEPS/vst3sdk" \
+            -DFETCHCONTENT_SOURCE_DIR_PUGIXML="$DEPS/pugixml" \
+            ${{ matrix.cmake_args }}
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build
@@ -166,7 +178,7 @@ jobs:
         shell: pwsh
         run: |
           $lib = Get-ChildItem -Path "OwnVST3Native/build" -Recurse `
-            -Filter "${{ matrix.lib_name }}" | Where-Object { $_.FullName -notmatch '_deps' } | Select-Object -First 1
+            -Filter "${{ matrix.lib_name }}" | Select-Object -First 1
           if ($lib) {
             New-Item -ItemType Directory -Force -Path "artifacts/${{ matrix.rid }}"
             Copy-Item $lib.FullName "artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}"
@@ -198,7 +210,7 @@ jobs:
         run: |
           ARCH_ARGS=""
           if [ "$RUNNER_OS" = "Windows" ]; then ARCH_ARGS="-A x64"; fi
-          cmake -S OwnVST3Native/build/_deps/vst3sdk-src -B OwnVST3Native/build-plugins $ARCH_ARGS \
+          cmake -S .deps/vst3sdk -B OwnVST3Native/build-plugins $ARCH_ARGS \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF \
             -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF \
