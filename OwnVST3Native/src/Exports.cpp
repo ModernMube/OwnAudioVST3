@@ -1,21 +1,10 @@
-/**
- * C export bridge of the ownvst3 shared library.
- *
- * This translation unit contains ONLY thin forwarding functions – no business
- * logic.  Every exported symbol declared in ownvst3_exports.h must appear here
- * exactly once so that the Windows DEF file, the macOS visibility attributes,
- * and the Linux symbol table all agree with what the C# P/Invoke layer expects.
- *
- * Threading notes are documented in ownvst3_exports.h.
- */
+// Thin C exports, everything real lives in PluginInstance / Scanner.
 
 #include "core/PluginInstance.h"
 #include "scan/Scanner.h"
 #include "../include/ownvst3_exports.h"
 
 #include <new>
-
-/* ── Discovery ─────────────────────────────────────────────────────────────── */
 
 OWNVST3_API bool OwnPlugin_ScanStart(int formatMask)
 {
@@ -72,8 +61,6 @@ OWNVST3_API bool OwnPlugin_RestoreScanCacheXml(const char* xml)
     return Scanner::instance().restoreCache(xml);
 }
 
-/* ── Lifecycle ─────────────────────────────────────────────────────────────── */
-
 OWNVST3_API VST3PluginHandle VST3Plugin_Create()
 {
     return new (std::nothrow) PluginInstance();
@@ -83,8 +70,6 @@ OWNVST3_API void VST3Plugin_Destroy(VST3PluginHandle handle)
 {
     delete static_cast<PluginInstance*>(handle);
 }
-
-/* ── Loading ────────────────────────────────────────────────────────────────── */
 
 OWNVST3_API bool VST3Plugin_LoadPlugin(VST3PluginHandle handle, const char* pluginPath)
 {
@@ -117,8 +102,6 @@ OWNVST3_API bool VST3Plugin_Initialize(VST3PluginHandle handle,
     if (!handle) return false;
     return static_cast<PluginInstance*>(handle)->initialize(sampleRate, maxBlockSize);
 }
-
-/* ── Metadata ───────────────────────────────────────────────────────────────── */
 
 OWNVST3_API const char* VST3Plugin_GetName(VST3PluginHandle handle)
 {
@@ -180,8 +163,6 @@ OWNVST3_API int VST3Plugin_GetLatencySamples(VST3PluginHandle handle)
     return static_cast<PluginInstance*>(handle)->getLatencySamples();
 }
 
-/* ── Parameters ─────────────────────────────────────────────────────────────── */
-
 OWNVST3_API int VST3Plugin_GetParameterCount(VST3PluginHandle handle)
 {
     if (!handle) return 0;
@@ -210,8 +191,6 @@ OWNVST3_API double VST3Plugin_GetParameter(VST3PluginHandle handle, int paramId)
     return static_cast<PluginInstance*>(handle)->getParameter(paramId);
 }
 
-/* ── Audio ──────────────────────────────────────────────────────────────────── */
-
 OWNVST3_API bool VST3Plugin_ProcessAudio(VST3PluginHandle handle, AudioBufferC* buffer)
 {
     if (!handle || !buffer) return false;
@@ -219,16 +198,12 @@ OWNVST3_API bool VST3Plugin_ProcessAudio(VST3PluginHandle handle, AudioBufferC* 
     return inst->processAudio(buffer->inputs, buffer->outputs, buffer->numChannels, buffer->numSamples);
 }
 
-/* ── MIDI ───────────────────────────────────────────────────────────────────── */
-
 OWNVST3_API bool VST3Plugin_ProcessMidi(VST3PluginHandle handle,
                                          const MidiEventC* events, int count)
 {
     if (!handle) return false;
     return static_cast<PluginInstance*>(handle)->processMidi(events, count);
 }
-
-/* ── Transport ──────────────────────────────────────────────────────────────── */
 
 OWNVST3_API void VST3Plugin_SetTempo(VST3PluginHandle handle, double bpm)
 {
@@ -253,8 +228,6 @@ OWNVST3_API void VST3Plugin_SetBypass(VST3PluginHandle handle, bool bypassed)
     if (handle)
         static_cast<PluginInstance*>(handle)->setBypass(bypassed);
 }
-
-/* ── Editor ─────────────────────────────────────────────────────────────────── */
 
 OWNVST3_API bool VST3Plugin_HasEditor(VST3PluginHandle handle)
 {
@@ -295,11 +268,8 @@ OWNVST3_API bool VST3Plugin_IsEditorOpen(VST3PluginHandle handle)
 
 OWNVST3_API void VST3Plugin_ProcessIdle(VST3PluginHandle handle)
 {
-    // Idle runs on the native UI thread / main run loop now; nothing to drive from C#.
     (void)handle;
 }
-
-/* ── State ──────────────────────────────────────────────────────────────────── */
 
 OWNVST3_API bool VST3Plugin_GetState(VST3PluginHandle handle,
                                       uint8_t** outData, int* outLength)
@@ -320,20 +290,11 @@ OWNVST3_API void VST3Plugin_FreeStateData(uint8_t* data)
     delete[] data;
 }
 
-/* ── String cache ───────────────────────────────────────────────────────────── */
-
 OWNVST3_API void VST3Plugin_ClearStringCache()
 {
-    // Instance-level caches are cleared when the instance is destroyed.
-    // This global no-op export satisfies the binary contract with older callers
-    // that resolved a process-wide string cache in the previous implementation.
 }
-
-/* ── SEH-safe dispatch (no-op) ──────────────────────────────────────────────── */
 
 OWNVST3_API void VST3Plugin_SafeDispatchMessage(void* msg)
 {
-    // The native UI thread guards its own DispatchMessage. Kept so the C#
-    // NativeLibrary.TryGetExport() call in ThreadedVst3Wrapper succeeds.
     (void)msg;
 }

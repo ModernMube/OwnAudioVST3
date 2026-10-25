@@ -1,5 +1,4 @@
-// Unit tests for the portable parts of the host. No framework: each TEST registers itself,
-// CHECK records a failure and carries on. Exit code = number of failed tests.
+// No framework: TEST registers itself, CHECK records and goes on. Exit code = failures.
 
 #include "core/AuIdentifier.h"
 #include "core/DelayLine.h"
@@ -33,8 +32,6 @@ namespace
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 
-/* ── StateCodec ─────────────────────────────────────────────────────────── */
-
 TEST(base64_round_trips_every_length)
 {
     for (size_t n = 0; n < 70; ++n)
@@ -53,7 +50,6 @@ TEST(base64_round_trips_every_length)
 
 TEST(base64_is_low_bit_first)
 {
-    // 0x01: the lowest bit lands in the first character, value 1 → 'A'.
     const uint8_t one = 0x01;
     CHECK(StateCodec::encodeBase64Lsb(&one, 1) == "1.A.");
 
@@ -63,7 +59,6 @@ TEST(base64_is_low_bit_first)
 
 TEST(base64_decodes_reference_blob)
 {
-    // IComponent child of an ADelay state written by the JUCE-based 1.7.0.
     std::vector<uint8_t> out;
     CHECK(StateCodec::decodeBase64Lsb("8.yLyL+......", out));
     CHECK(out.size() == 8);
@@ -148,8 +143,6 @@ TEST(plist_detection)
     CHECK(!StateCodec::looksLikePlist(reinterpret_cast<const uint8_t*>(vc2), 8));
 }
 
-/* ── Cache XML ──────────────────────────────────────────────────────────── */
-
 TEST(cache_round_trips)
 {
     std::vector<PluginRecord> in(2);
@@ -210,7 +203,6 @@ TEST(cache_rejects_malformed)
 TEST(uid_hash_matches_cache)
 {
 #if !defined(_WIN32)
-    // ADelay's class ID gives the uid attribute the 1.7.0 cache holds.
     auto uid = VST3::UID::fromString(std::string("0CDBB66985D548A9BFD8371909D24BB3"));
     CHECK(static_cast<bool>(uid));
     if (uid) CHECK(ownvst3_hash31(reinterpret_cast<const uint8_t*>(uid->data()), 16) == static_cast<int32_t>(0x777bacbfu));
@@ -225,8 +217,6 @@ TEST(absolute_paths)
     CHECK(!ownvst3_isAbsolutePath("AudioUnit:Effects/aufx,dely,appl"));
     CHECK(!ownvst3_isAbsolutePath(""));
 }
-
-/* ── AU identifiers ─────────────────────────────────────────────────────── */
 
 TEST(au_identifier_round_trips)
 {
@@ -260,8 +250,6 @@ TEST(au_identifier_parse_variants)
     CHECK(!ownvst3_parseAuIdentifier("/Library/Audio/Plug-Ins/Components/x.component", id));
 }
 
-/* ── MIDI → VST3 ────────────────────────────────────────────────────────── */
-
 TEST(midi_note_on_off)
 {
     MidiMapTable map;
@@ -278,7 +266,6 @@ TEST(midi_note_on_off)
     CHECK(ev.type == Event::kNoteOffEvent);
     CHECK(std::fabs(ev.noteOff.velocity - 64 / 127.0f) < 1e-6f);
 
-    // Note-on with velocity 0 is a note-off.
     CHECK(ownvst3_convertMidi({ 0x90, 61, 0, 0, 0 }, 64, map, ev, pid, v) == MidiConversion::Event);
     CHECK(ev.type == Event::kNoteOffEvent && ev.noteOff.pitch == 61);
 }
@@ -331,8 +318,6 @@ TEST(midi_poly_pressure_and_unknown)
     CHECK(ownvst3_convertMidi({ 0xC0, 5, 0, 0, 0 }, 64, map, ev, pid, v) == MidiConversion::None);
 }
 
-/* ── DelayLine ──────────────────────────────────────────────────────────── */
-
 TEST(delay_line_delays_by_latency)
 {
     DelayLine d;
@@ -344,7 +329,6 @@ TEST(delay_line_delays_by_latency)
     float* in[2]  = { inL.data(), inR.data() };
     float* out[2] = { outL.data(), outR.data() };
 
-    // Two uneven blocks: the ring position has to carry over.
     d.process(in, out, 2, 7);
     float* in2[2]  = { inL.data() + 7, inR.data() + 7 };
     float* out2[2] = { outL.data() + 7, outR.data() + 7 };
@@ -371,8 +355,6 @@ TEST(delay_line_in_place_and_zero)
     d.process(p, p, 1, 3);
     CHECK(x[0] == 0 && x[1] == 0 && x[2] == 1);
 }
-
-/* ── MpscQueue ──────────────────────────────────────────────────────────── */
 
 TEST(mpsc_fifo_and_full)
 {

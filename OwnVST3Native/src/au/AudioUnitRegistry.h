@@ -9,5 +9,4 @@ struct AudioUnitRegistryEntry
     bool isInstrument = false;
 };
 
-/** Lists every hostable AudioUnit without loading any. Empty on non-Apple. */
 std::vector<AudioUnitRegistryEntry> ownvst3_listAudioUnits();

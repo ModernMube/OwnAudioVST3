@@ -31,8 +31,6 @@ FUnknown* ownvst3_hostApplication()
     return app;
 }
 
-/* ── ComponentHandler ────────────────────────────────────────────────────── */
-
 tresult PLUGIN_API ComponentHandler::beginEdit(ParamID id)
 {
     if (auto* o = _owner.load(std::memory_order_acquire)) o->beginEdit(id);
@@ -81,8 +79,6 @@ uint32 PLUGIN_API ComponentHandler::release()
     if (r == 0) delete this;
     return r;
 }
-
-/* ── PlugFrame ───────────────────────────────────────────────────────────── */
 
 PlugFrame::PlugFrame(Vst3HostCallbacks* owner) : _owner(owner)
 {
@@ -136,8 +132,6 @@ uint32 PLUGIN_API PlugFrame::release()
     if (r == 0) delete this;
     return r;
 }
-
-/* ── VectorStream ────────────────────────────────────────────────────────── */
 
 tresult PLUGIN_API VectorStream::read(void* buffer, int32 numBytes, int32* numBytesRead)
 {
@@ -214,8 +208,6 @@ tresult PLUGIN_API VectorStream::queryInterface(const TUID iid, void** obj)
     return kNoInterface;
 }
 
-/* ── Fixed parameter changes ─────────────────────────────────────────────── */
-
 tresult PLUGIN_API FixedParamQueue::getPoint(int32 index, int32& sampleOffset, ParamValue& value)
 {
     if (index < 0 || index >= _count) return kResultFalse;
@@ -226,7 +218,6 @@ tresult PLUGIN_API FixedParamQueue::getPoint(int32 index, int32& sampleOffset, P
 
 tresult PLUGIN_API FixedParamQueue::addPoint(int32 sampleOffset, ParamValue value, int32& index)
 {
-    // Points must come in order; a later offset than the last one appends, the same one replaces.
     if (_count > 0 && _points[_count - 1].offset >= sampleOffset)
     {
         _points[_count - 1].value = value;

@@ -13,10 +13,8 @@
 class Vst3RunLoop;
 #endif
 
-/** Process-wide IHostApplication handed to every component and controller. */
 Steinberg::FUnknown* ownvst3_hostApplication();
 
-/** What the plugin asks of the host, routed back to the owning Vst3Backend. */
 class Vst3HostCallbacks
 {
 public:
@@ -28,10 +26,7 @@ public:
     virtual bool resizeView(Steinberg::IPlugView* view, Steinberg::ViewRect* rect) = 0;
 };
 
-/**
- * IComponentHandler + IComponentHandler2 (T-RackS 6 dereferences the latter unchecked).
- * Heap, refcounted: a controller may outlive the backend, so detach() cuts the link first.
- */
+// IComponentHandler2 too, T-RackS 6 uses it unchecked
 class ComponentHandler final : public Steinberg::Vst::IComponentHandler, public Steinberg::Vst::IComponentHandler2
 {
 public:
@@ -58,7 +53,6 @@ private:
     std::atomic<Steinberg::uint32>  _refs { 1 };
 };
 
-/** IPlugFrame for one open editor; on Linux it also hands out the Linux::IRunLoop. */
 class PlugFrame final : public Steinberg::IPlugFrame
 {
 public:
@@ -81,7 +75,6 @@ private:
 #endif
 };
 
-/** IBStream over a byte vector, for get/setState. Lives on the stack for one call. */
 class VectorStream final : public Steinberg::IBStream, public Steinberg::ISizeableStream
 {
 public:
@@ -108,7 +101,6 @@ private:
     int64_t _pos = 0;
 };
 
-/** IParamValueQueue with a fixed number of points; addPoint past it keeps the last value. */
 class FixedParamQueue final : public Steinberg::Vst::IParamValueQueue
 {
 public:
@@ -135,14 +127,12 @@ private:
     Steinberg::int32        _count = 0;
 };
 
-/** IParameterChanges sized once in prepare(); clear() and add are allocation free. */
 class FixedParameterChanges final : public Steinberg::Vst::IParameterChanges
 {
 public:
     void resize(int maxParameters) { _queues.resize(static_cast<size_t>(maxParameters < 1 ? 1 : maxParameters)); _used = 0; }
     void clear() noexcept { _used = 0; }
 
-    /** Host side: one point at sampleOffset. Returns false when full. */
     bool add(Steinberg::Vst::ParamID id, Steinberg::int32 sampleOffset, Steinberg::Vst::ParamValue value) noexcept;
 
     Steinberg::int32 PLUGIN_API getParameterCount() override { return _used; }

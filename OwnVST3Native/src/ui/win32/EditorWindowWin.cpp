@@ -80,7 +80,6 @@ namespace
                                          0, 0, width, height, _frame, nullptr, ownvst3_moduleInstance(), nullptr);
             _programmatic = false;
 
-            // The DPI of the monitor we landed on may differ from the owner's; size the client exactly.
             setContentSize(width, height);
         }
 

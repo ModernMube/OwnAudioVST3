@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <vector>
 
-/** Linux::IRunLoop for one editor, backed by the UI thread's poll loop and timers. */
 class Vst3RunLoop final : public Steinberg::Linux::IRunLoop
 {
 public:
@@ -20,7 +19,6 @@ public:
                                                 Steinberg::Linux::TimerInterval milliseconds) override;
     Steinberg::tresult PLUGIN_API unregisterTimer(Steinberg::Linux::ITimerHandler* handler) override;
 
-    /** Drops every registration; called when the editor goes away. */
     void clear();
 
     Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid, void** obj) override;

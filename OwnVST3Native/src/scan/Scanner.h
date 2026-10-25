@@ -11,11 +11,7 @@
 #include <thread>
 #include <vector>
 
-/**
- * Process-wide plugin discovery. Fast mode reads the AudioComponent registry and VST3
- * bundles' moduleinfo.json without loading anything; full mode loads each plugin (on the
- * UI thread, as VST3 requires) from a worker thread.
- */
+// fast mode loads nothing, full mode loads every plugin on the UI thread
 class Scanner
 {
 public:
@@ -40,7 +36,6 @@ private:
     Scanner() = default;
     ~Scanner();
 
-    /** Write-once: re-adding an identifier retires the old entry, a caller may still read its strings. */
     struct Entry
     {
         PluginRecord record;
@@ -63,7 +58,6 @@ private:
     std::vector<std::unique_ptr<Entry>> _retired;
     std::string                         _cacheXml;
 
-    /* Fixed buffer: currentItem() hands the pointer out while the worker keeps writing. */
     std::array<char, 512> _currentItem { '\0' };
 
     std::thread       _worker;

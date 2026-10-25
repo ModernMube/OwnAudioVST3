@@ -19,11 +19,6 @@
 #include <unordered_map>
 #include <vector>
 
-/**
- * A VST3 plugin hosted straight on the SDK. Built from the 1.5 SDK host (public domain)
- * plus what the JUCE era taught: IComponentHandler2, IMidiMapping, main-thread hasEditor,
- * content scale after attached(), no idle driven from C#.
- */
 class Vst3Backend final : public IPluginBackend, private Vst3HostCallbacks
 {
 public:
@@ -117,7 +112,6 @@ private:
     int                                           _bypassIndex = -1;
     MidiMapTable                                  _midiMap;
 
-    /* Everything process() touches, sized in prepare(). */
     std::vector<float>                           _scratch;
     std::vector<float*>                          _channelPtrs;
     std::vector<Steinberg::Vst::AudioBusBuffers> _inBuses, _outBuses;
@@ -128,7 +122,6 @@ private:
     bool _active     = false;
     bool _processing = false;
 
-    /* Editor – UI thread only, except the flag. */
     Steinberg::IPtr<Steinberg::IPlugView> _view;
     PlugFrame*                            _frame = nullptr;
     std::unique_ptr<EditorWindow>         _window;

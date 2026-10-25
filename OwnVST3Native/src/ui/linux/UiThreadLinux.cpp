@@ -33,7 +33,6 @@ namespace
     std::mutex                        s_taskMutex;
     std::deque<std::function<void()>> s_tasks;
 
-    // Touched on the UI thread only.
     std::map<uint64_t, FdHandler>                     s_fds;
     std::map<Window, std::function<void(XEvent&)>>    s_windows;
     uint64_t                                          s_nextFd = 1;

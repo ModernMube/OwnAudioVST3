@@ -11,12 +11,7 @@
 #include <string>
 #include <vector>
 
-/**
- * What a VST3PluginHandle points at: one backend plus everything format-neutral.
- *   - load / initialize / state / editor : any thread, backends hop to the UI thread
- *   - processAudio / processMidi        : audio thread, lock- and allocation-free
- *   - setParameter / transport / bypass : any thread
- */
+// what a VST3PluginHandle points at
 class PluginInstance
 {
 public:
@@ -73,7 +68,6 @@ private:
     MpscQueue<ParamChange, 1024> _paramQueue;
     MpscQueue<MidiEventC, 1024>  _midiQueue;
 
-    /* Audio-thread scratch, never resized there. */
     ParamChange _pendingParams[1024 + 1];
     MidiEventC  _pendingMidi[1024];
     DelayLine   _bypassDelay;

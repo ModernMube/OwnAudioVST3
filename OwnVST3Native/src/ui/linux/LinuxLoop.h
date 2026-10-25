@@ -5,10 +5,9 @@
 
 #include <X11/Xlib.h>
 
-/** The Linux UI thread's event loop: X11 events, plugin fds, timers. UI thread only. */
 namespace LinuxLoop
 {
-    /** Null when there is no X server (headless CI); editors are unavailable then. */
+    // null when headless
     Display* display();
 
     uint64_t addFd(int fd, std::function<void()> onReadable);

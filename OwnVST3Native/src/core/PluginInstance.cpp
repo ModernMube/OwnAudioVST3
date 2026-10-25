@@ -35,8 +35,6 @@ void PluginInstance::unparkAudioThread()
     _reconfiguring.store(false, std::memory_order_release);
 }
 
-/* ── Loading ─────────────────────────────────────────────────────────────── */
-
 bool PluginInstance::loadPlugin(const char* path)
 {
     return loadPluginAt(path, 0);
@@ -60,8 +58,6 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
 {
     if (!_backend || blockSize <= 0 || sampleRate <= 0) return false;
 
-    // The buffers processAudio() reads from are rebuilt below; park the audio thread
-    // and wait out any block in flight.
     parkAudioThread();
 
     const bool ok = _backend->prepare(sampleRate, blockSize);
@@ -86,8 +82,6 @@ bool PluginInstance::initialize(double sampleRate, int blockSize)
     unparkAudioThread();
     return ok;
 }
-
-/* ── Metadata ────────────────────────────────────────────────────────────── */
 
 const char* PluginInstance::getName()
 {
@@ -140,8 +134,6 @@ int PluginInstance::getActualInputChannels() const  { return _backend ? _backend
 int PluginInstance::getActualOutputChannels() const { return _backend ? _backend->outputChannels() : 0; }
 int PluginInstance::getLatencySamples() const       { return _backend && _blockSize > 0 ? _backend->latencySamples() : 0; }
 
-/* ── Parameters ──────────────────────────────────────────────────────────── */
-
 int PluginInstance::getParameterCount() const
 {
     return _backend ? _backend->parameterCount() : 0;
@@ -178,8 +170,6 @@ double PluginInstance::getParameter(int paramId) const
     return _backend ? _backend->parameterValue(paramId) : 0.0;
 }
 
-/* ── Audio (audio thread – no allocation, no locks) ──────────────────────── */
-
 bool PluginInstance::processAudio(float** inputs, float** outputs, int numChannels, int numSamples)
 {
     if (_disposed.load(std::memory_order_relaxed) || !_backend) return false;
@@ -196,7 +186,6 @@ bool PluginInstance::processAudio(float** inputs, float** outputs, int numChanne
 
 bool PluginInstance::processBody(float** inputs, float** outputs, int numChannels, int numSamples)
 {
-    // Wider than initialize() prepared for would overrun what the plugin was promised.
     if (!_backend || _blockSize <= 0 || numSamples <= 0 || numSamples > _blockSize || numChannels < 0)
         return false;
 
@@ -224,7 +213,6 @@ bool PluginInstance::processBody(float** inputs, float** outputs, int numChannel
     }
     else if (inputs)
     {
-        // Fed every block, so the dry path is already latency-aligned the moment bypass flips.
         _bypassDelay.process(inputs, _bypassOut.data(), delayed, numSamples);
     }
     _bypassActive = bypass;
@@ -249,7 +237,6 @@ bool PluginInstance::processBody(float** inputs, float** outputs, int numChannel
             from = delayed;
         }
 
-        // Channels the plugin has no output for pass through untouched.
         for (int c = from; c < numChannels; ++c)
             if (outputs[c] && inputs && inputs[c] && outputs[c] != inputs[c])
                 std::memcpy(outputs[c], inputs[c], bytes);
@@ -270,14 +257,10 @@ bool PluginInstance::processMidi(const MidiEventC* events, int count)
     return true;
 }
 
-/* ── Transport ───────────────────────────────────────────────────────────── */
-
 void PluginInstance::setTempo(double bpm)            { _bpm.store(bpm, std::memory_order_relaxed); }
 void PluginInstance::setTransportState(bool playing) { _playing.store(playing, std::memory_order_relaxed); }
 void PluginInstance::resetTransportPosition()        { _samplePos.store(0, std::memory_order_relaxed); }
 void PluginInstance::setBypass(bool bypassed)        { _bypassed.store(bypassed, std::memory_order_relaxed); }
-
-/* ── Editor ──────────────────────────────────────────────────────────────── */
 
 bool PluginInstance::createEditor(void* ownerWindowHandle)
 {
@@ -309,8 +292,6 @@ bool PluginInstance::isEditorOpen() const
 {
     return _backend && _backend->isEditorOpen();
 }
-
-/* ── State ───────────────────────────────────────────────────────────────── */
 
 bool PluginInstance::getState(uint8_t** outData, int* outLength)
 {

@@ -1,25 +1,8 @@
 #pragma once
 
-/**
- * Public C API of the ownvst3 shared library (VST3 SDK + AudioToolbox, no JUCE).
- *
- * Function names, parameter types and struct layouts are frozen: the C# P/Invoke
- * layer (OwnVst3Wrapper, ThreadedVst3Wrapper, VstEditorController) binds to them
- * unchanged since 1.5. New functionality only ever arrives as new exports.
- *
- * Struct layout rules
- * -------------------
- * Every struct here matches its [StructLayout(LayoutKind.Sequential)] counterpart
- * in the C# project.  Natural alignment is used on both sides (no #pragma pack).
- *
- * Threading contract
- * ------------------
- *  - VST3Plugin_ProcessAudio / VST3Plugin_ProcessMidi : audio thread only, lock-free
- *  - All other exports                                 : any thread (internally synchronised)
- *
- * Plugin and editor calls are marshalled internally onto one UI thread: a native
- * thread with its own message / event loop on Windows and Linux, the main thread
- * on macOS. The main thread is never blocked waiting on another thread.
+/*
+ * ownvst3 C API. Names and struct layouts are frozen, the C# P/Invoke side binds to them.
+ * ProcessAudio / ProcessMidi: audio thread only. Everything else: any thread.
  */
 
 #include <stdint.h>
@@ -35,22 +18,8 @@ extern "C" {
     #define OWNVST3_API __attribute__((visibility("default")))
 #endif
 
-/** Opaque pointer to a plugin instance created by VST3Plugin_Create(). */
 typedef void* VST3PluginHandle;
 
-/**
- * Parameter descriptor returned by VST3Plugin_GetParameterAt().
- * The 'name' pointer is owned by the plugin instance and remains valid
- * until VST3Plugin_Destroy() is called on the same handle.
- *
- * C# counterpart: OwnVst3Wrapper.VST3ParameterC  (LayoutKind.Sequential)
- *   int id           – 4 bytes at offset  0
- *   IntPtr name      – 8 bytes at offset  8  (4 bytes natural padding after id on 64-bit)
- *   double minValue  – 8 bytes at offset 16
- *   double maxValue  – 8 bytes at offset 24
- *   double default   – 8 bytes at offset 32
- *   double current   – 8 bytes at offset 40
- */
 typedef struct {
     int32_t      id;
     const char*  name;
@@ -60,12 +29,6 @@ typedef struct {
     double       currentValue;
 } VST3ParameterC;
 
-/**
- * Audio buffer passed to VST3Plugin_ProcessAudio().
- * 'inputs' and 'outputs' point to GC-pinned float* arrays allocated by the C# caller.
- *
- * C# counterpart: OwnVst3Wrapper.AudioBufferC  (LayoutKind.Sequential)
- */
 typedef struct {
     float** inputs;
     float** outputs;
@@ -73,311 +36,102 @@ typedef struct {
     int32_t numSamples;
 } AudioBufferC;
 
-/**
- * Single MIDI event for VST3Plugin_ProcessMidi().
- *
- * C# counterpart: OwnVst3Wrapper.MidiEventC  (LayoutKind.Sequential)
- *   byte status      – offset 0
- *   byte data1       – offset 1
- *   byte data2       – offset 2
- *   [1 byte padding] – offset 3
- *   int sampleOffset – offset 4
- *   Total size: 8 bytes
- */
 typedef struct {
     uint8_t  status;
     uint8_t  data1;
     uint8_t  data2;
-    uint8_t  _reserved;    /* explicit padding – do not use */
+    uint8_t  _reserved;
     int32_t  sampleOffset;
 } MidiEventC;
 
-/* ── Plugin discovery (format-neutral, added in 1.7.0) ─────────────────────── */
-
-/** Bit flags for OwnPlugin_ScanStart(). */
 #define OWNPLUGIN_FORMAT_VST3       0x01
 #define OWNPLUGIN_FORMAT_AUDIOUNIT  0x02
 #define OWNPLUGIN_FORMAT_ALL        0x7fffffff
 
-/** Scan modes for OwnPlugin_ScanStartMode(). */
-#define OWNPLUGIN_SCAN_FAST  0   /* registry / bundle metadata only, nothing is loaded */
-#define OWNPLUGIN_SCAN_FULL  1   /* loads every plugin — minutes, but fills in everything */
+#define OWNPLUGIN_SCAN_FAST  0
+#define OWNPLUGIN_SCAN_FULL  1
 
-/**
- * One discovered plugin. The char* pointers are owned by the scanner and stay
- * valid until the next scan or cache restore, so copy them out.
- * 'identifier' is what VST3Plugin_LoadPlugin() takes: a path for VST3, an
- * "AudioUnit:Type/subtype,manufacturer" token for AU. Channel counts are -1
- * after a fast scan until OwnPlugin_ResolveDescriptor() fills them in.
- */
+/* strings belong to the scanner until the next scan, copy them */
 typedef struct {
     const char* name;
     const char* vendor;
     const char* version;
     const char* category;
     const char* identifier;
-    const char* formatName;     /* "VST3" or "AudioUnit" */
-    const char* fileOrPath;     /* empty for registry-only AUs */
+    const char* formatName;
+    const char* fileOrPath;
     int32_t     isInstrument;
     int32_t     numInputs;
     int32_t     numOutputs;
     int32_t     uniqueId;
-    int32_t     _reserved;      /* explicit padding – do not use */
+    int32_t     _reserved;
 } PluginDescriptorC;
 
-/** Background scan in fast mode. Returns false if a scan is already running. */
 OWNVST3_API bool OwnPlugin_ScanStart(int formatMask);
-
-/** As above with an explicit OWNPLUGIN_SCAN_* mode. */
 OWNVST3_API bool OwnPlugin_ScanStartMode(int formatMask, int mode);
 
-/**
- * Loads the one plugin named by identifier to fill in what a fast scan left out
- * (channel counts), and updates the cached entry. Blocks; do not call on the UI thread.
- */
+/* loads the plugin, blocks - not from the UI thread */
 OWNVST3_API bool OwnPlugin_ResolveDescriptor(const char* identifier, PluginDescriptorC* out);
 
-/** True while the background scan thread is still working. */
 OWNVST3_API bool OwnPlugin_ScanIsRunning();
-
-/** Scan progress in [0,1]. */
 OWNVST3_API float OwnPlugin_ScanProgress();
-
-/** Name of the plugin currently being probed, or "" when idle. */
 OWNVST3_API const char* OwnPlugin_ScanCurrentItem();
-
-/** Asks the scan thread to stop after the current plugin. Does not block. */
 OWNVST3_API void OwnPlugin_ScanCancel();
-
-/** Number of plugins found so far. Safe to poll during a scan. */
 OWNVST3_API int OwnPlugin_GetScannedCount();
-
-/** Fills *out with the descriptor at index. Returns false if index is out of range. */
 OWNVST3_API bool OwnPlugin_GetScannedAt(int index, PluginDescriptorC* out);
-
-/**
- * Serialises the current result list to XML so the host can skip the next scan.
- * Pointer stays valid until the next call to this function.
- */
 OWNVST3_API const char* OwnPlugin_GetScanCacheXml();
-
-/** Replaces the result list with a previously saved cache. Returns false on malformed XML. */
 OWNVST3_API bool OwnPlugin_RestoreScanCacheXml(const char* xml);
 
-/* ── Lifecycle ─────────────────────────────────────────────────────────────── */
-
-/** Creates and returns a new plugin instance. Returns NULL on failure. */
 OWNVST3_API VST3PluginHandle VST3Plugin_Create();
-
-/** Destroys the instance and releases all native resources. */
 OWNVST3_API void VST3Plugin_Destroy(VST3PluginHandle handle);
 
-/* ── Plugin loading ────────────────────────────────────────────────────────── */
-
-/**
- * Loads the plugin at pluginPath. Must be called before Initialize().
- *
- * pluginPath is a file or identifier: a .vst3 path as always, and on macOS
- * also a .component path or an "AudioUnit:..." identifier from
- * OwnPlugin_GetScannedAt().  Behaviour for VST3 paths is unchanged.
- */
 OWNVST3_API bool VST3Plugin_LoadPlugin(VST3PluginHandle handle, const char* pluginPath);
-
-/**
- * Same as VST3Plugin_LoadPlugin() but picks the subIndex'th plugin inside a
- * bundle that exposes several (common for AU .component bundles).
- * subIndex 0 is exactly what VST3Plugin_LoadPlugin() does.
- */
 OWNVST3_API bool OwnPlugin_LoadPluginAt(VST3PluginHandle handle, const char* pluginPath, int subIndex);
-
-/** Format the loaded plugin came from: "VST3", "AudioUnit", or "" if nothing is loaded. */
 OWNVST3_API const char* OwnPlugin_GetFormatName(VST3PluginHandle handle);
-
-/** Identifier the loaded plugin was resolved from — round-trips through VST3Plugin_LoadPlugin(). */
 OWNVST3_API const char* OwnPlugin_GetIdentifier(VST3PluginHandle handle);
 
-/**
- * Prepares the plugin for audio processing.
- * Must be called after LoadPlugin() and before ProcessAudio()/ProcessMidi().
- *
- * Safe to call again on a running instance to grow maxBlockSize: it waits out any
- * in-flight block and ProcessAudio() refuses blocks meanwhile rather than blocking.
- */
+/* can be called again to grow maxBlockSize */
 OWNVST3_API bool VST3Plugin_Initialize(VST3PluginHandle handle, double sampleRate, int maxBlockSize);
 
-/* ── Metadata ──────────────────────────────────────────────────────────────── */
-
-/** Returns the plugin display name. Pointer valid until Destroy(). */
 OWNVST3_API const char* VST3Plugin_GetName(VST3PluginHandle handle);
-
-/** Returns the manufacturer/vendor name. Pointer valid until Destroy(). */
 OWNVST3_API const char* VST3Plugin_GetVendor(VST3PluginHandle handle);
-
-/** Returns the plugin version string. Pointer valid until Destroy(). */
 OWNVST3_API const char* VST3Plugin_GetVersion(VST3PluginHandle handle);
-
-/** Returns a combined info string (name + vendor + version). Pointer valid until Destroy(). */
 OWNVST3_API const char* VST3Plugin_GetPluginInfo(VST3PluginHandle handle);
-
-/** Returns true if the plugin accepts MIDI input and produces audio output (synth). */
 OWNVST3_API bool VST3Plugin_IsInstrument(VST3PluginHandle handle);
-
-/** Returns true if the plugin processes audio (effect / insert). */
 OWNVST3_API bool VST3Plugin_IsEffect(VST3PluginHandle handle);
-
-/** Returns true if the plugin accepts MIDI but produces no audio output. */
 OWNVST3_API bool VST3Plugin_IsMidiOnly(VST3PluginHandle handle);
-
-/** Returns the number of input channels negotiated with the plugin. */
 OWNVST3_API int VST3Plugin_GetActualInputChannels(VST3PluginHandle handle);
-
-/** Returns the number of output channels negotiated with the plugin. */
 OWNVST3_API int VST3Plugin_GetActualOutputChannels(VST3PluginHandle handle);
-
-/**
- * Returns the plugin's processing latency in samples (per channel), as reported
- * after Initialize().  Zero before initialization or for a zero-latency plugin.
- * A native audio host uses this to delay-compensate other tracks so a plugin's
- * output stays sample-accurately aligned.
- */
 OWNVST3_API int VST3Plugin_GetLatencySamples(VST3PluginHandle handle);
 
-/* ── Parameters ────────────────────────────────────────────────────────────── */
-
-/** Returns the total parameter count. */
 OWNVST3_API int VST3Plugin_GetParameterCount(VST3PluginHandle handle);
-
-/**
- * Fills *outParam with the descriptor of the parameter at the given index.
- * Returns false if index is out of range or outParam is NULL.
- */
 OWNVST3_API bool VST3Plugin_GetParameterAt(VST3PluginHandle handle, int index, VST3ParameterC* outParam);
-
-/**
- * Enqueues a parameter change for the next audio block.
- * Safe to call from any thread; delivered lock-free to the audio thread.
- */
 OWNVST3_API bool VST3Plugin_SetParameter(VST3PluginHandle handle, int paramId, double value);
-
-/** Returns the current normalised [0,1] value of the parameter at index paramId. */
 OWNVST3_API double VST3Plugin_GetParameter(VST3PluginHandle handle, int paramId);
 
-/* ── Audio processing ──────────────────────────────────────────────────────── */
-
-/**
- * Processes one block of audio.  Must be called exclusively from the audio thread.
- * MIDI events accumulated via ProcessMidi() since the last call are consumed here.
- *
- * Returns false without touching the buffers when numSamples exceeds the maxBlockSize
- * passed to Initialize(); the caller keeps its dry signal and re-initializes off the
- * audio thread. Never allocates.
- */
+/* false when numSamples > maxBlockSize, buffers untouched then */
 OWNVST3_API bool VST3Plugin_ProcessAudio(VST3PluginHandle handle, AudioBufferC* buffer);
-
-/* ── MIDI processing ───────────────────────────────────────────────────────── */
-
-/**
- * Accumulates MIDI events for the next ProcessAudio() call.
- * Must be called exclusively from the audio thread.
- */
 OWNVST3_API bool VST3Plugin_ProcessMidi(VST3PluginHandle handle, const MidiEventC* events, int count);
 
-/* ── Transport ─────────────────────────────────────────────────────────────── */
-
-/** Enqueues a tempo change (BPM).  Safe to call from any thread. */
 OWNVST3_API void VST3Plugin_SetTempo(VST3PluginHandle handle, double bpm);
-
-/** Enqueues a transport play/stop state change.  Safe to call from any thread. */
 OWNVST3_API void VST3Plugin_SetTransportState(VST3PluginHandle handle, bool isPlaying);
-
-/** Resets the internal sample-position counter to zero.  Safe to call from any thread. */
 OWNVST3_API void VST3Plugin_ResetTransportPosition(VST3PluginHandle handle);
-
-/**
- * Enables or disables plugin bypass.  Safe to call from any thread.
- *
- * When bypassed, the plugin is still driven every block (so it never goes cold),
- * either through the plugin's own bypass parameter (VST3 kIsBypass) or, when it
- * has none, with the input passed through delayed by the plugin's reported
- * latency.  Toggling bypass therefore introduces no time shift relative to the
- * processed output — unlike a host-side dry/wet switch, whose zero-latency dry
- * path would jump in time against the latency-delayed wet path.
- */
 OWNVST3_API void VST3Plugin_SetBypass(VST3PluginHandle handle, bool bypassed);
 
-/* ── Editor window ─────────────────────────────────────────────────────────── */
-
-/**
- * Returns true if the plugin has an editor UI.
- * Safe to call from any thread; does NOT create a temporary editor component.
- * Use this to decide whether to show an open-editor action.  The actual pixel
- * dimensions are only available via VST3Plugin_GetEditorSize() once the editor
- * is open.
- */
 OWNVST3_API bool VST3Plugin_HasEditor(VST3PluginHandle handle);
-
-/**
- * Opens the plugin editor in a top-level window owned by the native library.
- * windowHandle is used as the Win32 owner window on Windows (not as a parent/embed target).
- * Must be called from the UI thread.
- */
 OWNVST3_API bool VST3Plugin_CreateEditor(VST3PluginHandle handle, void* windowHandle);
-
-/** Closes and destroys the editor window.  Must be called from the UI thread. */
 OWNVST3_API void VST3Plugin_CloseEditor(VST3PluginHandle handle);
-
-/** Requests that the editor window be resized to the given pixel dimensions. */
 OWNVST3_API void VST3Plugin_ResizeEditor(VST3PluginHandle handle, int width, int height);
-
-/**
- * Retrieves the preferred editor size in pixels.
- * Returns false if no editor is available or the plugin has no UI.
- */
 OWNVST3_API bool VST3Plugin_GetEditorSize(VST3PluginHandle handle, int* width, int* height);
-
-/** Returns true if the editor window is currently open and visible. */
 OWNVST3_API bool VST3Plugin_IsEditorOpen(VST3PluginHandle handle);
-
-/**
- * Drives any pending plugin idle processing.
- * No-op: plugin idle is driven by the native UI thread / main run loop.
- * Kept for binary compatibility.
- */
 OWNVST3_API void VST3Plugin_ProcessIdle(VST3PluginHandle handle);
 
-/* ── State serialisation ───────────────────────────────────────────────────── */
-
-/**
- * Serialises the complete plugin state into a newly allocated buffer.
- * On success, *outData points to a heap buffer of *outLength bytes.
- * The caller MUST release the buffer via VST3Plugin_FreeStateData().
- */
+/* free the buffer with VST3Plugin_FreeStateData */
 OWNVST3_API bool VST3Plugin_GetState(VST3PluginHandle handle, uint8_t** outData, int* outLength);
-
-/**
- * Restores the plugin state from a previously obtained buffer.
- * data must remain valid for the duration of the call.
- */
 OWNVST3_API bool VST3Plugin_SetState(VST3PluginHandle handle, const uint8_t* data, int length);
-
-/** Releases a buffer previously returned by VST3Plugin_GetState(). */
 OWNVST3_API void VST3Plugin_FreeStateData(uint8_t* data);
 
-/* ── String cache ──────────────────────────────────────────────────────────── */
-
-/** Clears all internally cached name/vendor/version strings.  Safe to call from any thread. */
 OWNVST3_API void VST3Plugin_ClearStringCache();
-
-/* ── Windows SEH-safe message dispatch ────────────────────────────────────── */
-
-/**
- * No-op.
- *
- * The 1.5 implementation wrapped Win32 DispatchMessage() for the C#-owned
- * message loop. Messages are now pumped by the native UI thread, which guards
- * its own dispatch, so this export exists solely for binary compatibility with
- * the C# caller that resolves it via NativeLibrary.TryGetExport().
- */
 OWNVST3_API void VST3Plugin_SafeDispatchMessage(void* msg);
 
 #ifdef __cplusplus

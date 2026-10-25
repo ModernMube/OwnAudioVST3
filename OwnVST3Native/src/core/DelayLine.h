@@ -4,10 +4,7 @@
 #include <cstring>
 #include <vector>
 
-/**
- * Fixed delay per channel, sized once in prepare(). Feeds the bypass path of plugins
- * without a bypass parameter so dry stays time-aligned with the latency-delayed wet.
- */
+// bypass path for plugins without a bypass param, keeps dry in line with wet
 class DelayLine
 {
 public:
@@ -27,7 +24,7 @@ public:
 
     int delay() const noexcept { return _delay; }
 
-    /** in and out may alias. Channels past what prepare() sized for are copied straight through. */
+    // in and out may alias
     void process(float* const* in, float* const* out, int channels, int frames) noexcept
     {
         for (int ch = 0; ch < channels; ++ch)

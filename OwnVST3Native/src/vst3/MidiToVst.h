@@ -8,10 +8,6 @@
 
 #include <array>
 
-/**
- * CC / channel pressure / pitch bend → parameter, as the plugin's IMidiMapping answered at load.
- * Read-only after that, so the audio thread uses it without locking.
- */
 struct MidiMapTable
 {
     static constexpr int kControllers = Steinberg::Vst::kCountCtrlNumber;
@@ -35,10 +31,6 @@ struct MidiMapTable
 
 enum class MidiConversion { None, Event, Parameter };
 
-/**
- * One MIDI message → a VST3 note / pressure event, or a parameter change through the map.
- * sampleOffset is clamped into [0, blockSize). Never allocates.
- */
 MidiConversion ownvst3_convertMidi(const MidiEventC& in, int blockSize, const MidiMapTable& map,
                                    Steinberg::Vst::Event& event,
                                    Steinberg::Vst::ParamID& param, double& value) noexcept;

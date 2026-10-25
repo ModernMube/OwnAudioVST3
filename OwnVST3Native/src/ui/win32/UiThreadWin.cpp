@@ -63,8 +63,7 @@ namespace
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
 
-    // A crashing plugin WndProc must not take the UI thread down. No C++ objects with
-    // destructors may live in a function that uses __try.
+    // __try: no objects with destructors in here
     void dispatchGuarded(const MSG* msg)
     {
         __try
@@ -122,10 +121,9 @@ namespace
     }
 }
 
+// our own module, the exe's handle clashes with JUCE plugins (TDR Nova)
 HINSTANCE ownvst3_moduleInstance()
 {
-    // Our own HINSTANCE, not the host exe's: window classes registered with the exe's
-    // handle collide with JUCE-based plugins doing the same (TDR Nova, e60afc3).
     static HMODULE self = [] {
         HMODULE m = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,

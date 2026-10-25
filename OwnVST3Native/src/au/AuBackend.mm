@@ -56,8 +56,7 @@ namespace
         return code(@"type", out.type) && code(@"subtype", out.subtype) && code(@"manufacturer", out.manufacturer);
     }
 
-    // JUCE-made units adopt the thread they are created on as their message thread, so
-    // creation happens on the UI thread; on a worker their menus never close again.
+    // JUCE AUs bind to the creating thread, so this has to be the UI thread
     AUAudioUnit* instantiate(const AudioComponentDescription& desc, bool isV3)
     {
         if (!isV3)
@@ -87,7 +86,6 @@ namespace
         if (UiThread::isCurrent() || !UiThread::available()) start();
         else                                                UiThread::post(start);
 
-        // The main thread must not sit in a wait an AUv3 completion may need it for.
         if (pthread_main_np())
         {
             const CFAbsoluteTime until = CFAbsoluteTimeGetCurrent() + 10.0;
@@ -434,7 +432,6 @@ namespace
                     if (![bus setFormat:f error:nil] && wanted != current && current > 0)
                         [bus setFormat:[[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:current] error:nil];
 
-                    // The v2 bridge starts with every bus disabled and then refuses to pull input.
                     bus.enabled = YES;
                 }
             };
@@ -475,7 +472,6 @@ namespace
                 _names.push_back(toStd(p.displayName));
                 _addresses.push_back(p.address);
 
-                // A v2 unit knows its real default; the tree only knows the current value.
                 AudioUnitParameterInfo info {};
                 UInt32 size = sizeof(info);
                 if (_v2 && AudioUnitGetProperty(_v2, kAudioUnitProperty_ParameterInfo, kAudioUnitScope_Global,
@@ -504,7 +500,6 @@ namespace
             {
                 if (i >= _names.size()) break;
 
-                // The tree of a bridged v2 unit lags behind a fullState write; the unit itself does not.
                 AudioUnitParameterValue v = p.value;
                 if (_v2) AudioUnitGetParameter(_v2, static_cast<AudioUnitParameterID>(_addresses[i]), kAudioUnitScope_Global, 0, &v);
 
@@ -565,8 +560,6 @@ namespace
                 return noErr;
             };
         }
-
-        /* ── Editor (UI thread) ─────────────────────────────────────────── */
 
         bool openEditorOnUi(void* owner)
         {
@@ -655,7 +648,6 @@ namespace
         std::vector<AUValue>                 _mins, _maxs;
         std::unique_ptr<std::atomic<double>[]> _values;
 
-        /* Render state, sized in prepare(). */
         bool                       _allocated = false;
         int                        _maxBlock  = 0;
         int64_t                    _renderPos = 0;
@@ -668,7 +660,6 @@ namespace
         std::vector<float*>        _inPtrs, _outPtrs;
         std::vector<std::vector<uint8_t>> _outLists;
 
-        /* Editor. */
         std::unique_ptr<EditorWindow>      _window;
         NSViewController*                  _viewController = nil;
         std::atomic<bool>                  _editorOpen { false };

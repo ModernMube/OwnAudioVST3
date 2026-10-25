@@ -14,7 +14,7 @@
 
 namespace
 {
-    // 0 = not probed, 1 = main queue is pumped, 2 = nobody pumps it (headless)
+    // 0 unknown, 1 main queue pumped, 2 headless
     std::atomic<int> s_mainLoop { 0 };
     std::mutex       s_probeMutex;
 
@@ -100,7 +100,6 @@ namespace UiThread
                                       interval, 0, 0, timerFired, &ctx);
         if (!t->ref) return 0;
 
-        // Common modes, so the timer keeps firing while a plugin tracks a menu (ecd1079).
         CFRunLoopAddTimer(CFRunLoopGetMain(), t->ref, kCFRunLoopCommonModes);
 
         std::lock_guard<std::mutex> lock(s_timerMutex);

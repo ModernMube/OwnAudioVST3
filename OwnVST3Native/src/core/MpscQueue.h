@@ -5,12 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-/**
- * Lock-free multi-producer / single-consumer ring buffer (Vyukov sequence scheme).
- *
- * Capacity must be a power of two.  Any number of threads may call tryEnqueue();
- * exactly one thread — the audio thread — may call tryDequeue().
- */
+// Vyukov MPSC ring, capacity must be a power of two
 template<typename T, std::size_t Capacity>
 class MpscQueue
 {
@@ -24,7 +19,6 @@ public:
             _slots[i].seq.store(i, std::memory_order_relaxed);
     }
 
-    /** Enqueues item. Returns false if the queue is full. Safe from any thread. */
     bool tryEnqueue(const T& item) noexcept
     {
         std::size_t pos = _write.load(std::memory_order_relaxed);
@@ -55,7 +49,6 @@ public:
         }
     }
 
-    /** Dequeues into item. Consumer thread only. Returns false if the queue is empty. */
     bool tryDequeue(T& item) noexcept
     {
         const std::size_t pos = _read.load(std::memory_order_relaxed);

@@ -70,6 +70,7 @@ Vst3Backend::~Vst3Backend()
     UiThread::call([this] { unloadOnUi(); });
 }
 
+// createView() probe stays on the UI thread (IK plugins)
 bool Vst3Backend::loadOnUi(const std::string& path, int subIndex)
 {
     std::string error;
@@ -85,7 +86,6 @@ bool Vst3Backend::loadOnUi(const std::string& path, int subIndex)
             audioClasses.push_back(info);
     if (audioClasses.empty()) return false;
 
-    // Out of range falls back to the first class, as the 1.6/1.7 builds did.
     const auto& cls = audioClasses[subIndex >= 0 && subIndex < static_cast<int>(audioClasses.size()) ? subIndex : 0];
 
     _identifier    = path;
@@ -148,7 +148,6 @@ bool Vst3Backend::loadOnUi(const std::string& path, int subIndex)
     readParameters();
     buildMidiMap();
 
-    // Probing createView() belongs on the UI thread: IK plugins tear down run loop sources in it.
     if (_controller)
     {
         if (IPtr<IPlugView> probe = owned(_controller->createView(ViewType::kEditor)))
@@ -208,7 +207,6 @@ bool Vst3Backend::setupBuses()
         };
         auto in2 = wanted(inArr), out2 = wanted(outArr);
 
-        // Stereo on the main buses if the plugin takes it; otherwise whatever it already had.
         if (_processor->setBusArrangements(in2.data(), numIn, out2.data(), numOut) != kResultTrue)
             _processor->setBusArrangements(inArr.data(), numIn, outArr.data(), numOut);
     }
@@ -309,7 +307,6 @@ bool Vst3Backend::prepare(double sampleRate, int maxBlockSize)
         for (int32 i = 0; i < numIn; ++i)  { _inBuses[static_cast<size_t>(i)].numChannels  = busChannels(_component, kInput, i);  channels += static_cast<size_t>(_inBuses[static_cast<size_t>(i)].numChannels); }
         for (int32 i = 0; i < numOut; ++i) { _outBuses[static_cast<size_t>(i)].numChannels = busChannels(_component, kOutput, i); channels += static_cast<size_t>(_outBuses[static_cast<size_t>(i)].numChannels); }
 
-        // Every bus gets real buffers, active or not: some plugins read the inactive ones anyway.
         _scratch.assign(channels * static_cast<size_t>(maxBlockSize), 0.0f);
         _channelPtrs.assign(channels, nullptr);
 
@@ -331,7 +328,6 @@ bool Vst3Backend::prepare(double sampleRate, int maxBlockSize)
         if (_component->setActive(true) != kResultOk) return;
         _active = true;
 
-        // Plenty of plugins answer kNotImplemented here and process fine regardless.
         _processor->setProcessing(true);
         _processing = true;
 
@@ -486,8 +482,6 @@ int Vst3Backend::process(float* const* in, float* const* out, int numChannels, i
     return written;
 }
 
-/* ── Plugin → host ───────────────────────────────────────────────────────── */
-
 void Vst3Backend::performEdit(ParamID id, ParamValue value)
 {
     const int idx = indexOf(id);
@@ -521,8 +515,6 @@ void Vst3Backend::onIdle()
         closeEditorOnUi();
 }
 
-/* ── Editor ──────────────────────────────────────────────────────────────── */
-
 bool Vst3Backend::openEditor(void* ownerWindow)
 {
     if (!UiThread::available()) return false;
@@ -532,6 +524,7 @@ bool Vst3Backend::openEditor(void* ownerWindow)
     return ok;
 }
 
+// content scale only after attached(), TDR Nova crashes otherwise
 void Vst3Backend::openEditorOnUi(void* owner, bool& ok)
 {
     if (_window) { _window->show(); ok = true; return; }
@@ -564,7 +557,6 @@ void Vst3Backend::openEditorOnUi(void* owner, bool& ok)
     }
     _attached = true;
 
-    // After attached(), never before: TDR Nova crashes in its WndProc otherwise (e60afc3).
 #if !defined(__APPLE__)
     if (auto scale = queryAs<IPlugViewContentScaleSupport>(_view))
         scale->setContentScaleFactor(static_cast<IPlugViewContentScaleSupport::ScaleFactor>(_window->scaleFactor()));
@@ -578,7 +570,6 @@ void Vst3Backend::openEditorOnUi(void* owner, bool& ok)
             _window->setContentSize(rect.getWidth(), rect.getHeight());
     }
 
-    // Shown only now that the view is attached (d974b0c).
     _window->show();
     _editorOpen.store(true, std::memory_order_release);
     ok = true;
@@ -671,8 +662,6 @@ void Vst3Backend::onUserResize(int width, int height)
     _inResize = false;
 }
 
-/* ── State ───────────────────────────────────────────────────────────────── */
-
 bool Vst3Backend::getState(std::vector<uint8_t>& out)
 {
     bool ok = false;
@@ -735,7 +724,6 @@ bool Vst3Backend::setState(const uint8_t* data, size_t size)
         }
         else if (!StateCodec::hasVst3Header(data, size))
         {
-            // ≤ 1.5.21 wrote the raw component stream, or the controller's when that was empty.
             VectorStream cs(data, size);
             _component->setState(&cs);
             if (_controller)

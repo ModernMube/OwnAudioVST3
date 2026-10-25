@@ -68,8 +68,6 @@ namespace
             [_window orderOut:nil];
             [_window close];
 
-            // AppKit's focus-ring and key-loop observers still point at the window and the
-            // plugin's views until the run loop has gone round; keep them alive until then.
             NSWindow* window = _window;
             NSArray*  views  = _retired;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -109,13 +107,10 @@ namespace
 
         bool isVisible() const override { return _window.visible; }
 
-        // VST3 and AU views size themselves in points on macOS; the backing scale is theirs.
         double scaleFactor() const override { return 1.0; }
 
         void prepareForViewRemoval() override
         {
-            // AppKit holds the first responder and the key-view loop unretained; once the
-            // plugin frees its NSView those become dangling and crash at the next pool drain.
             _retired = [_content.subviews copy];
 
             [_window makeFirstResponder:nil];

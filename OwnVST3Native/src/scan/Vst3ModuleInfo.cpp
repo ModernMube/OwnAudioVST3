@@ -36,7 +36,6 @@ bool ownvst3_applyModuleInfo(const std::string& json, PluginRecord& record)
 
     const auto& cls = *audio.front();
 
-    // Several audio classes in one bundle (mda-vst3): the bundle keeps its own name.
     if (audio.size() == 1 && !cls.name.empty()) record.name = cls.name;
     record.vendor  = cls.vendor.empty() ? info->factoryInfo.vendor : cls.vendor;
     record.version = cls.version;
