@@ -12,7 +12,10 @@ env:
 
 jobs:
   # ============================================================
-  # Build JUCE-based native library for every target platform
+  # Build the native library (VST3 SDK + AudioToolbox, no JUCE)
+  # for every target platform. Where the runner can execute the
+  # result, also run the native unit tests and the C# API tests
+  # against the VST3 SDK sample plugins.
   # ============================================================
   build-native:
     strategy:
@@ -24,35 +27,47 @@ jobs:
             rid: win-x64
             lib_name: ownvst3.dll
             cmake_args: -A x64
+            native_tests: true
+            api_tests: true
 
           # Windows x86
           - os: windows-latest
             rid: win-x86
             lib_name: ownvst3.dll
             cmake_args: -A Win32
+            native_tests: true
+            api_tests: false
 
           # Windows ARM64
           - os: windows-latest
             rid: win-arm64
             lib_name: ownvst3.dll
             cmake_args: -A ARM64
+            native_tests: false
+            api_tests: false
 
           # macOS Universal (x86_64 + arm64 fat binary)
           - os: macos-latest
             rid: osx-universal
             lib_name: libownvst3.dylib
             cmake_args: -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            native_tests: true
+            api_tests: true
 
           # Linux x64
           - os: ubuntu-latest
             rid: linux-x64
             lib_name: libownvst3.so
             cmake_args: ""
+            native_tests: true
+            api_tests: true
 
           # Linux ARM64 (cross-compile from x64 runner)
           - os: ubuntu-latest
             rid: linux-arm64
             lib_name: libownvst3.so
+            native_tests: false
+            api_tests: false
             cmake_args: >-
               -DCMAKE_SYSTEM_NAME=Linux
               -DCMAKE_SYSTEM_PROCESSOR=aarch64
@@ -70,28 +85,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ── Linux x64 dependencies ────────────────────────────────────────────
+      # ── Linux x64 dependencies (X11 for the editor window, nothing else) ─
       - name: Install Linux x64 dependencies
         if: matrix.rid == 'linux-x64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            cmake ninja-build \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev \
-            libfreetype6-dev libfontconfig1-dev libasound2-dev libgl1-mesa-dev
+          sudo apt-get install -y cmake ninja-build libx11-dev
 
       # ── Linux ARM64 cross-compile dependencies ────────────────────────────
       - name: Install Linux ARM64 cross-compile toolchain and sysroot
         if: matrix.rid == 'linux-arm64'
         run: |
           sudo apt-get update
-          # Cross-compile toolchain + native host libs (juceaide runs on x86_64
-          # and must compile juce_gui_basics, so native X11/freetype are required)
           sudo apt-get install -y cmake ninja-build \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            binutils-aarch64-linux-gnu \
-            libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev \
-            libfreetype6-dev libfontconfig1-dev libasound2-dev libgl1-mesa-dev
+            binutils-aarch64-linux-gnu
 
           # Enable ARM64 packages from ports.ubuntu.com
           sudo dpkg --add-architecture arm64
@@ -121,40 +129,44 @@ jobs:
           # Update: ignore 404 errors from sources that lack arm64 indices;
           # ports.ubuntu.com arm64 index is still fetched successfully.
           sudo apt-get update || true
-          sudo apt-get install -y \
-            libx11-dev:arm64 libxrandr-dev:arm64 libxinerama-dev:arm64 \
-            libxcursor-dev:arm64 libxext-dev:arm64 \
-            libfreetype6-dev:arm64 libfontconfig1-dev:arm64 libasound2-dev:arm64 \
-            libgl1-mesa-dev:arm64
+          sudo apt-get install -y libx11-dev:arm64
 
-      # ── JUCE FetchContent cache (avoids re-downloading on every CI run) ──
-      - name: Cache JUCE source
+      # ── FetchContent cache: VST3 SDK + pugixml ────────────────────────────
+      - name: Cache dependencies
         uses: actions/cache@v4
         with:
-          path: OwnVST3Juce/build/_deps
-          key: juce-8.0.4-${{ runner.os }}-${{ matrix.rid }}
+          path: OwnVST3Native/build/_deps
+          key: deps-vst3sdk-3.8.1_84-pugixml-1.15-${{ runner.os }}-${{ matrix.rid }}
           restore-keys: |
-            juce-8.0.4-${{ runner.os }}-
+            deps-vst3sdk-3.8.1_84-pugixml-1.15-${{ runner.os }}-
 
       # ── CMake configure ───────────────────────────────────────────────────
       - name: Configure CMake
-        working-directory: OwnVST3Juce
         shell: bash
-        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} ${{ matrix.cmake_args }}
+        run: >-
+          cmake -S OwnVST3Native -B OwnVST3Native/build
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DOWNVST3_BUILD_TESTS=${{ matrix.native_tests && 'ON' || 'OFF' }}
+          ${{ matrix.cmake_args }}
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build
-        working-directory: OwnVST3Juce
         shell: bash
-        run: cmake --build build --config ${{ env.BUILD_TYPE }}
+        run: cmake --build OwnVST3Native/build --config ${{ env.BUILD_TYPE }} --parallel
+
+      # ── Native unit tests (state codec, cache XML, MIDI mapping …) ────────
+      - name: Native unit tests
+        if: matrix.native_tests
+        shell: bash
+        run: ctest --test-dir OwnVST3Native/build -C ${{ env.BUILD_TYPE }} --output-on-failure
 
       # ── Collect artifact (Windows) ────────────────────────────────────────
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $lib = Get-ChildItem -Path "OwnVST3Juce/build" -Recurse `
-            -Filter "${{ matrix.lib_name }}" | Select-Object -First 1
+          $lib = Get-ChildItem -Path "OwnVST3Native/build" -Recurse `
+            -Filter "${{ matrix.lib_name }}" | Where-Object { $_.FullName -notmatch '_deps' } | Select-Object -First 1
           if ($lib) {
             New-Item -ItemType Directory -Force -Path "artifacts/${{ matrix.rid }}"
             Copy-Item $lib.FullName "artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}"
@@ -168,8 +180,47 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p artifacts/${{ matrix.rid }}
-          find OwnVST3Juce/build -name "${{ matrix.lib_name }}" \
-            -exec cp {} artifacts/${{ matrix.rid }}/ \;
+          cp OwnVST3Native/build/${{ matrix.lib_name }} artifacts/${{ matrix.rid }}/
+
+      # ── The licence promise: no JUCE in what we ship ──────────────────────
+      - name: Check binary is JUCE-free
+        shell: bash
+        run: |
+          if grep -a -i -q juce "artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}"; then
+            echo "::error::JUCE found in ${{ matrix.lib_name }}"
+            exit 1
+          fi
+
+      # ── VST3 SDK sample plugins the API tests load (MIT, built here) ──────
+      - name: Build test plugins
+        if: matrix.api_tests
+        shell: bash
+        run: |
+          ARCH_ARGS=""
+          if [ "$RUNNER_OS" = "Windows" ]; then ARCH_ARGS="-A x64"; fi
+          cmake -S OwnVST3Native/build/_deps/vst3sdk-src -B OwnVST3Native/build-plugins $ARCH_ARGS \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF \
+            -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF \
+            -DSMTG_RUN_VST_VALIDATOR=OFF \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF
+          cmake --build OwnVST3Native/build-plugins --config ${{ env.BUILD_TYPE }} --parallel \
+            --target adelay again-sample-accurate mda-vst3 sync-delay legacy-midicc-out utf16-name
+
+      - name: Setup .NET
+        if: matrix.api_tests
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # ── C# API tests: exports, golden files, VST3 / AU behaviour, scanner ─
+      - name: API tests
+        if: matrix.api_tests
+        shell: bash
+        env:
+          OWNVST3_NATIVE_LIB: ${{ github.workspace }}/artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}
+          OWNVST3_TEST_PLUGINS: ${{ github.workspace }}/OwnVST3Native/build-plugins/VST3/${{ env.BUILD_TYPE }}
+        run: dotnet test OwnVST3Tests/OwnVST3Tests.csproj --configuration Release --logger "console;verbosity=normal"
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
