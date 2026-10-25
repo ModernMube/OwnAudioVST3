@@ -37,4 +37,10 @@ public:
 
     /** Physical pixels per logical pixel, what IPlugViewContentScaleSupport wants. */
     virtual double scaleFactor() const = 0;
+
+    /**
+     * Call before the plugin takes its view out: hides the window and lets go of every
+     * pointer AppKit keeps into the plugin's views (first responder, key-view loop, popups).
+     */
+    virtual void prepareForViewRemoval() {}
 };

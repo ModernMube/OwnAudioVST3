@@ -49,6 +49,8 @@ namespace
             _content = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
             _content.autoresizesSubviews = YES;
             _window.contentView = _content;
+            _window.acceptsMouseMovedEvents = YES;
+            _window.autorecalculatesKeyViewLoop = NO;
 
             _delegate = [[OwnVst3EditorDelegate alloc] init];
             _delegate.callbacks = &_callbacks;
@@ -65,6 +67,15 @@ namespace
             if (_parent) [_parent removeChildWindow:_window];
             [_window orderOut:nil];
             [_window close];
+
+            // AppKit's focus-ring and key-loop observers still point at the window and the
+            // plugin's views until the run loop has gone round; keep them alive until then.
+            NSWindow* window = _window;
+            NSArray*  views  = _retired;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                (void)window;
+                (void)views;
+            });
         }
 
         void* parentHandle() const override { return (__bridge void*)_content; }
@@ -101,6 +112,24 @@ namespace
         // VST3 and AU views size themselves in points on macOS; the backing scale is theirs.
         double scaleFactor() const override { return 1.0; }
 
+        void prepareForViewRemoval() override
+        {
+            // AppKit holds the first responder and the key-view loop unretained; once the
+            // plugin frees its NSView those become dangling and crash at the next pool drain.
+            _retired = [_content.subviews copy];
+
+            [_window makeFirstResponder:nil];
+            _window.initialFirstResponder = nil;
+            _content.nextKeyView = nil;
+
+            for (NSWindow* child in [_window.childWindows copy])
+            {
+                [_window removeChildWindow:child];
+                [child orderOut:nil];
+            }
+            [_window orderOut:nil];
+        }
+
     private:
         static NSWindow* ownerWindow(void* owner)
         {
@@ -116,6 +145,7 @@ namespace
         NSWindow*                _window   = nil;
         NSView*                  _content  = nil;
         NSWindow*                _parent   = nil;
+        NSArray*                 _retired  = nil;
         OwnVst3EditorDelegate*   _delegate = nil;
     };
 }

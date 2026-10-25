@@ -56,25 +56,36 @@ namespace
         return code(@"type", out.type) && code(@"subtype", out.subtype) && code(@"manufacturer", out.manufacturer);
     }
 
+    // JUCE-made units adopt the thread they are created on as their message thread, so
+    // creation happens on the UI thread; on a worker their menus never close again.
     AUAudioUnit* instantiate(const AudioComponentDescription& desc, bool isV3)
     {
-        NSError* error = nil;
-
-        // v2 components come up synchronously and in process, no matter who pumps the main queue.
         if (!isV3)
-            return [[AUAudioUnit alloc] initWithComponentDescription:desc
-                                                             options:kAudioComponentInstantiation_LoadInProcess
-                                                               error:&error];
+        {
+            AUAudioUnit* au = nil;
+            UiThread::call([&] {
+                au = [[AUAudioUnit alloc] initWithComponentDescription:desc
+                                                               options:kAudioComponentInstantiation_LoadInProcess
+                                                                 error:nil];
+            });
+            return au;
+        }
 
-        __block AUAudioUnit* result = nil;
+        struct Box { AUAudioUnit* au = nil; };
+        auto box = std::make_shared<Box>();
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
 
-        [AUAudioUnit instantiateWithComponentDescription:desc
-                                                 options:kAudioComponentInstantiation_LoadInProcess
-                                       completionHandler:^(AUAudioUnit* au, NSError*) {
-            result = au;
-            dispatch_semaphore_signal(done);
-        }];
+        auto start = [box, done, desc] {
+            [AUAudioUnit instantiateWithComponentDescription:desc
+                                                     options:kAudioComponentInstantiation_LoadInProcess
+                                           completionHandler:^(AUAudioUnit* au, NSError*) {
+                box->au = au;
+                dispatch_semaphore_signal(done);
+            }];
+        };
+
+        if (UiThread::isCurrent() || !UiThread::available()) start();
+        else                                                UiThread::post(start);
 
         // The main thread must not sit in a wait an AUv3 completion may need it for.
         if (pthread_main_np())
@@ -87,7 +98,7 @@ namespace
         {
             dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC));
         }
-        return result;
+        return box->au;
     }
 
     class AuBackend final : public IPluginBackend
@@ -114,12 +125,15 @@ namespace
 
             self->_identifier = ownvst3_makeAuIdentifier(id);
             self->_type       = id.type;
-            self->readMeta(comp, id);
-            self->readBuses();
-            self->readParameters();
 
-            if (@available(macOS 13.0, *)) self->_hasEditor = true;
-            else                           self->_hasEditor = self->_au.providesUserInterface;
+            UiThread::call([&] {
+                self->readMeta(comp, id);
+                self->readBuses();
+                self->readParameters();
+
+                if (@available(macOS 13.0, *)) self->_hasEditor = true;
+                else                           self->_hasEditor = self->_au.providesUserInterface;
+            });
 
             return self;
         }
@@ -127,9 +141,11 @@ namespace
         ~AuBackend() override
         {
             *_alive = false;
-            UiThread::call([this] { closeEditorOnUi(); });
-            if (_allocated) [_au deallocateRenderResources];
-            _au = nil;
+            UiThread::call([this] {
+                closeEditorOnUi();
+                if (_allocated) [_au deallocateRenderResources];
+                _au = nil;
+            });
         }
 
         const char*        formatName() const noexcept override { return "AudioUnit"; }
@@ -146,6 +162,13 @@ namespace
         int latencySamples() const override { return _latency; }
 
         bool prepare(double sampleRate, int maxBlockSize) override
+        {
+            bool ok = false;
+            UiThread::call([&] { ok = prepareOnUi(sampleRate, maxBlockSize); });
+            return ok;
+        }
+
+        bool prepareOnUi(double sampleRate, int maxBlockSize)
         {
             if (_allocated) { [_au deallocateRenderResources]; _allocated = false; }
 
@@ -608,6 +631,7 @@ namespace
         {
             ++_editorGeneration;
             _editorOpen.store(false, std::memory_order_release);
+            if (_window) _window->prepareForViewRemoval();
             if (_viewController) [_viewController.view removeFromSuperview];
             _viewController = nil;
             _window.reset();

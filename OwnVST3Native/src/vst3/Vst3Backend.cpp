@@ -594,6 +594,8 @@ void Vst3Backend::closeEditorOnUi()
     _editorOpen.store(false, std::memory_order_release);
     _closePending.store(false, std::memory_order_release);
 
+    if (_window) _window->prepareForViewRemoval();
+
     if (_view)
     {
         if (_attached) _view->removed();
