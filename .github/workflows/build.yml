@@ -442,6 +442,7 @@ jobs:
           files: |
             release-artifacts/OwnVST3-native-all.zip
             release-artifacts/OwnVST3Sharp-Release.zip
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
