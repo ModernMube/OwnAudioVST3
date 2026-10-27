@@ -3,7 +3,7 @@
 # Builds IosSmokeTest.cpp against the simulator slice and runs it in a booted (or freshly booted) simulator.
 set -euo pipefail
 
-XCF="$1"
+XCF="$(cd "$1" && pwd)"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(mktemp -d)"
 SLICE="$(ls -d "$XCF"/ios-*simulator)"
