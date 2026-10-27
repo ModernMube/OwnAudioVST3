@@ -367,6 +367,12 @@ namespace OwnVST3Tests
                 p.ResizeEditor(300, 200);
                 p.CloseEditor();
                 p.ProcessIdle();
+
+                //No editor means the view is never touched, so any handle is fine here
+                Assert.IsFalse(p.AttachEditorToView(IntPtr.Zero));
+                Assert.IsFalse(p.AttachEditorToView(new IntPtr(0x1000)));
+                p.DetachEditor();
+                Assert.IsFalse(p.IsEditorOpen);
             }
         }
 

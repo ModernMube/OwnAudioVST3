@@ -126,6 +126,10 @@ OWNVST3_API bool VST3Plugin_GetEditorSize(VST3PluginHandle handle, int* width, i
 OWNVST3_API bool VST3Plugin_IsEditorOpen(VST3PluginHandle handle);
 OWNVST3_API void VST3Plugin_ProcessIdle(VST3PluginHandle handle);
 
+/* 2.1: editor inside a view the app owns (iOS UIView, macOS NSView), UI thread. AudioUnit only for now */
+OWNVST3_API bool OwnPlugin_AttachEditorToView(VST3PluginHandle handle, void* view);
+OWNVST3_API void OwnPlugin_DetachEditor(VST3PluginHandle handle);
+
 /* free the buffer with VST3Plugin_FreeStateData */
 OWNVST3_API bool VST3Plugin_GetState(VST3PluginHandle handle, uint8_t** outData, int* outLength);
 OWNVST3_API bool VST3Plugin_SetState(VST3PluginHandle handle, const uint8_t* data, int length);

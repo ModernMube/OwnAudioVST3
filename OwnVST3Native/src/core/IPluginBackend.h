@@ -64,6 +64,10 @@ public:
     virtual bool editorSize(int& width, int& height) = 0;
     virtual bool isEditorOpen() const = 0;
 
+    // the plugin's view inside a view the app owns (UIView / NSView). false where unsupported
+    virtual bool attachEditor(void* parentView) { (void)parentView; return false; }
+    virtual void detachEditor() {}
+
     virtual bool getState(std::vector<uint8_t>& out) = 0;
     virtual bool setState(const uint8_t* data, size_t size) = 0;
 };

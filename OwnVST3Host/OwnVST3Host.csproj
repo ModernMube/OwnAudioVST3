@@ -9,11 +9,11 @@
     <!-- NuGet packaging information -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>OwnAudioVst</PackageId>
-    <Version>2.0.0</Version>
+    <Version>2.1.0</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
-    <Description>C# wrapper for the OwnVst3 native library to work with VST3 plugins, and AudioUnit plugins on macOS. Includes a background plugin scanner and cross-platform native editor support (Windows, macOS, Linux).</Description>
-    <PackageTags>vst;vst3;audiounit;au;audio;plugin;wrapper;editor;native;cross-platform</PackageTags>
+    <Description>C# host for VST3 plugins (Windows, macOS, Linux) and AudioUnits (macOS, iOS) on an MIT-licensed native core built on the Steinberg VST 3 SDK. Background plugin scanner, native editor windows on the desktop, plugin views embedded in your own UIView on iOS.</Description>
+    <PackageTags>vst;vst3;audiounit;au;auv3;ios;audio;plugin;wrapper;editor;native;cross-platform</PackageTags>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/ModernMube/OwnAudioVST3</RepositoryUrl>
@@ -75,11 +75,21 @@
           Pack="true"
           PackagePath="runtimes\osx-arm64\native"
           Condition="Exists('..\runtimes\osx-arm64\native\libownvst3.dylib')" />
+
+    <!-- iOS: device + simulator slices, embedded into the app by buildTransitive\...\OwnAudioVst.targets -->
+    <None Include="..\runtimes\ios\native\ownvst3.xcframework\**\*"
+          Pack="true"
+          PackagePath="runtimes\ios\native\ownvst3.xcframework"
+          Condition="Exists('..\runtimes\ios\native\ownvst3.xcframework')" />
+    <None Include="build\OwnAudioVst.targets"
+          Pack="true"
+          PackagePath="buildTransitive\net10.0-ios18.0\OwnAudioVst.targets" />
   </ItemGroup>
 
   <!-- Copy native libraries to output directory when building -->
   <ItemGroup>
     <None Include="..\runtimes\**\*"
+          Exclude="..\runtimes\ios\**"
           CopyToOutputDirectory="PreserveNewest"
           LinkBase="runtimes"
           Condition="Exists('..\runtimes')" />

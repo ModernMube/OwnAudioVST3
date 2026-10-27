@@ -165,7 +165,8 @@ namespace OwnVST3Host
             }
         }
 
-        public static bool AudioUnitSupported => OperatingSystem.IsMacOS();
+        /// <summary>macOS and iOS. VST3 is desktop only.</summary>
+        public static bool AudioUnitSupported => OperatingSystem.IsMacOS() || OperatingSystem.IsIOS();
 
         public static bool IsScanning
         {

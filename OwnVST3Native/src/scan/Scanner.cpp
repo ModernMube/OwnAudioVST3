@@ -1,15 +1,27 @@
 #include "Scanner.h"
-#include "Vst3ModuleInfo.h"
 #include "au/AudioUnitRegistry.h"
 #include "core/BackendFactory.h"
 
+#if !defined(OWNVST3_NO_VST3)
+#include "Vst3ModuleInfo.h"
 #include "public.sdk/source/vst/hosting/module.h"
+#endif
 
 #include <algorithm>
 #include <cstring>
 
 namespace
 {
+    // iOS builds carry no VST3: no folders to walk
+    std::vector<std::string> vst3Paths()
+    {
+#if defined(OWNVST3_NO_VST3)
+        return {};
+#else
+        return VST3::Hosting::Module::getModulePaths();
+#endif
+    }
+
     int formatBit(const std::string& formatName)
     {
         if (formatName == "VST3")      return OWNPLUGIN_FORMAT_VST3;
@@ -113,7 +125,8 @@ void Scanner::fastScan(int formatMask)
 
     if (formatMask & OWNPLUGIN_FORMAT_VST3)
     {
-        for (const auto& path : VST3::Hosting::Module::getModulePaths())
+#if !defined(OWNVST3_NO_VST3)
+        for (const auto& path : vst3Paths())
         {
             if (_cancelled.load(std::memory_order_acquire)) break;
 
@@ -121,6 +134,7 @@ void Scanner::fastScan(int formatMask)
             std::lock_guard<std::mutex> lock(_mutex);
             add(r);
         }
+#endif
     }
 
     _total.store(1, std::memory_order_release);
@@ -134,7 +148,7 @@ void Scanner::fullScan(int formatMask)
     if (formatMask & OWNPLUGIN_FORMAT_AUDIOUNIT)
         for (const auto& au : ownvst3_listAudioUnits()) jobs.push_back(au.identifier);
     if (formatMask & OWNPLUGIN_FORMAT_VST3)
-        for (const auto& path : VST3::Hosting::Module::getModulePaths()) jobs.push_back(path);
+        for (const auto& path : vst3Paths()) jobs.push_back(path);
 
     _total.store(static_cast<int>(jobs.size()), std::memory_order_release);
 

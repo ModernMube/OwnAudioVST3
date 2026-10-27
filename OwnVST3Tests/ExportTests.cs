@@ -25,7 +25,8 @@ namespace OwnVST3Tests
             "OwnPlugin_ScanStart", "OwnPlugin_ScanStartMode", "OwnPlugin_ResolveDescriptor", "OwnPlugin_ScanIsRunning",
             "OwnPlugin_ScanProgress", "OwnPlugin_ScanCurrentItem", "OwnPlugin_ScanCancel", "OwnPlugin_GetScannedCount",
             "OwnPlugin_GetScannedAt", "OwnPlugin_GetScanCacheXml", "OwnPlugin_RestoreScanCacheXml",
-            "OwnPlugin_LoadPluginAt", "OwnPlugin_GetFormatName", "OwnPlugin_GetIdentifier"
+            "OwnPlugin_LoadPluginAt", "OwnPlugin_GetFormatName", "OwnPlugin_GetIdentifier",
+            "OwnPlugin_AttachEditorToView", "OwnPlugin_DetachEditor"
         };
 
         private static IntPtr _lib;
@@ -42,9 +43,10 @@ namespace OwnVST3Tests
         private static string _str(IntPtr p) => Marshal.PtrToStringUTF8(p) ?? "<null>";
 
         [TestMethod]
-        public void AllFiftyExportsResolve()
+        public void AllExportsResolve()
         {
-            Assert.HasCount(50, _allExports);
+            // 50 frozen since 1.7, plus the two embedded-editor ones of 2.1
+            Assert.HasCount(52, _allExports);
             foreach (string name in _allExports)
                 Assert.IsTrue(NativeLibrary.TryGetExport(_lib, name, out _), "missing export " + name);
         }
@@ -110,6 +112,8 @@ namespace OwnVST3Tests
                 Assert.IsFalse(w.HasEditor);
                 Assert.IsFalse(w.IsEditorOpen);
                 Assert.IsFalse(w.CreateEditor(IntPtr.Zero));
+                Assert.IsFalse(w.AttachEditorToView(new IntPtr(0x1000)));
+                w.DetachEditor();
                 Assert.IsNull(w.GetEditorSize());
                 Assert.IsNull(w.GetState());
                 Assert.IsFalse(w.SetState(new byte[] { 1, 2, 3 }));

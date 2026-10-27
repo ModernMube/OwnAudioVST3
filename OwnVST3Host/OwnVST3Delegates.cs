@@ -93,6 +93,7 @@ namespace OwnVST3Host
             _freeStateDataFunc = (delegate* unmanaged[Cdecl]<IntPtr, void>)_tryExport("VST3Plugin_FreeStateData");
 
             _initFormatDelegates();
+            _initEmbedDelegates();
         }
 
         private void* _export(string functionName)

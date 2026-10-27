@@ -10,7 +10,7 @@ since 2.0 the native host no longer uses JUCE.
 | Steinberg VST 3 SDK (`pluginterfaces`, `base`, `public.sdk` hosting and moduleinfo sources) | 3.8.1 | MIT | loading and running VST3 plugins, `moduleinfo.json` |
 | pugixml | 1.15 | MIT | plugin cache XML, VST3 state container XML |
 | OwnVST3 host (ModernMube/OwnVST3, 6a838e3) | – | Unlicense (public domain) | starting point of the VST3 backend |
-| Apple AudioToolbox, AVFoundation, CoreAudioKit, AppKit | system | Apple system frameworks, linked, not redistributed | AudioUnit hosting on macOS |
+| Apple AudioToolbox, AVFoundation, CoreAudioKit, AppKit / UIKit | system | Apple system frameworks, linked, not redistributed | AudioUnit hosting on macOS and iOS |
 
 The VST3 SDK sample plugins (`adelay`, `again-sample-accurate`, `mda-vst3`, …) are built in CI
 for the tests only. They are not part of the package.

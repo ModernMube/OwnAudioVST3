@@ -54,6 +54,8 @@ public:
     bool hasEditor() const;
     bool getEditorSize(int& width, int& height);
     bool isEditorOpen() const;
+    bool attachEditor(void* parentView);
+    void detachEditor();
 
     bool getState(uint8_t** outData, int* outLength);
     bool setState(const uint8_t* data, int length);

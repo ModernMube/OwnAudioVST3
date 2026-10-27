@@ -1,5 +1,8 @@
 #include "BackendFactory.h"
+
+#if !defined(OWNVST3_NO_VST3)
 #include "../vst3/Vst3Backend.h"
+#endif
 
 #if defined(__APPLE__)
 #include "../au/AuBackend.h"
@@ -42,8 +45,10 @@ std::unique_ptr<IPluginBackend> ownvst3_createBackend(const std::string& identif
 {
     switch (ownvst3_kindOf(identifier))
     {
+#if !defined(OWNVST3_NO_VST3)
         case PluginKind::Vst3:
             return Vst3Backend::load(withoutTrailingSlash(identifier), subIndex);
+#endif
 #if defined(__APPLE__)
         case PluginKind::AudioUnit:
             return ownvst3_createAuBackend(withoutTrailingSlash(identifier), subIndex);

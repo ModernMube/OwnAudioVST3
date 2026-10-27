@@ -119,6 +119,18 @@ namespace OwnVST3Tests
         }
 
         [TestMethod]
+        public void AttachEditorWantsAView()
+        {
+            using (var p = TestEnv.Load(Delay))
+            {
+                Assert.IsTrue(p.HasEditor);
+                Assert.IsFalse(p.AttachEditorToView(IntPtr.Zero));
+                p.DetachEditor();
+                Assert.IsFalse(p.IsEditorOpen);
+            }
+        }
+
+        [TestMethod]
         public async Task ResolveFillsChannels()
         {
             var d = await PluginScanner.ResolveAsync(new PluginDescriptor { Identifier = Delay });

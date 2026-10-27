@@ -1,6 +1,6 @@
 # OwnVST3Host — Developer Guide
 
-A thread-safe, cross-platform C# library for hosting VST3 plugins — plus AudioUnits on macOS. Designed to integrate cleanly into audio applications where the UI thread, the audio thread, and the plugin's native runtime must never interfere with each other.
+A thread-safe, cross-platform C# library for hosting VST3 plugins (Windows, macOS, Linux) — plus AudioUnits on macOS and iOS, AUv3 extensions included. Designed to integrate cleanly into audio applications where the UI thread, the audio thread, and the plugin's native runtime must never interfere with each other.
 
 ---
 
@@ -468,6 +468,25 @@ made to wait for another thread. There is no idle to drive from C# — `ProcessI
 for compatibility and does nothing. Closing the window with its title-bar button is noticed by the
 native side: `IsEditorOpen` turns false on its own.
 
+### Embedding the editor in your own view (iOS, macOS)
+
+iOS has no top-level editor windows, so `CreateEditor` / `OpenEditorAsync` return false there.
+Hand the plugin a view you own instead — a `UIView` on iOS (for example the one behind an Avalonia
+`NativeControlHost`), an `NSView` on macOS — on the UI thread:
+
+```csharp
+if (await plugin.HasEditorAsync())
+    plugin.AttachEditorToView(myView.Handle);   // fills the view a moment later
+
+// ...
+plugin.DetachEditor();
+```
+
+The plugin hands its view over asynchronously: `AttachEditorToView` returns as soon as the request
+is made, `IsEditorOpen` and `GetEditorSize()` follow once the view is in. AudioUnits only; for a
+VST3 the call returns false. Apple's built-in units have no view on iOS, `HasEditor` is false for
+them.
+
 ---
 
 ## Plugin Discovery
@@ -494,7 +513,7 @@ Console.WriteLine(OwnVst3Wrapper.GetVst3DirectoriesInfo());
 
 ### Scanning every format (VST3 + AudioUnit)
 
-`FindVst3Plugins()` above walks directories, which works for VST3 bundles but can never find an AudioUnit — AUs live in the macOS AudioComponent registry and are addressed by an identifier, not a path. `PluginScanner` goes through the native side instead and returns both formats.
+`FindVst3Plugins()` above walks directories, which works for VST3 bundles but can never find an AudioUnit — AUs live in the AudioComponent registry (macOS, iOS) and are addressed by an identifier, not a path. `PluginScanner` goes through the native side instead and returns both formats.
 
 ```csharp
 IReadOnlyList<PluginDescriptor> all = await PluginScanner.ScanAsync();
@@ -508,7 +527,7 @@ await plugin.LoadPluginAsync(all[0]);
 
 ### Fast vs. full scans
 
-`ScanMode.Fast` (the default) reads only metadata that costs nothing: the macOS AudioComponent registry for AUs, and for VST3 the bundle's `moduleinfo.json` when it ships one (name, vendor, category, instrument flag — otherwise just the bundle name). No plugin is loaded, so a machine with hundreds of plugins scans in a fraction of a second. The price is that `InputChannels` and `OutputChannels` come back as `-1` — getting those means loading the plugin.
+`ScanMode.Fast` (the default) reads only metadata that costs nothing: the AudioComponent registry for AUs, and for VST3 the bundle's `moduleinfo.json` when it ships one (name, vendor, category, instrument flag — otherwise just the bundle name). No plugin is loaded, so a machine with hundreds of plugins scans in a fraction of a second. The price is that `InputChannels` and `OutputChannels` come back as `-1` — getting those means loading the plugin.
 
 `ScanMode.Full` does load every plugin (on the UI thread, as VST3 requires), which is why DAW plugin scans take minutes. Use it only if you genuinely need channel counts for the entire list up front, and cache the result:
 
@@ -541,7 +560,7 @@ Console.WriteLine($"{resolved?.InputChannels} in / {resolved?.OutputChannels} ou
 | `GetResults()` | Current result list; safe to call mid-scan for partial results |
 | `GetCacheXml()` / `RestoreCache(xml)` | Persist and reload the list to skip a rescan |
 | `IsScanning`, `CurrentItem`, `Cancel()` | Progress polling and cancellation |
-| `IsSupported`, `AudioUnitSupported` | Native library capability / macOS check |
+| `IsSupported`, `AudioUnitSupported` | Native library capability / macOS or iOS check |
 
 `PluginDescriptor` carries `Name`, `Vendor`, `Version`, `Category`, `Identifier`, `Format`, `FilePath`, `IsInstrument`, `InputChannels`, `OutputChannels`, `UniqueId` and `IsResolved`. `FilePath` is empty for registry-only AudioUnits — always load by `Identifier`.
 
@@ -563,8 +582,8 @@ await plugin.LoadPluginAtAsync("/Library/Audio/Plug-Ins/Components/Suite.compone
 ### Runtime / architecture detection
 
 ```csharp
-string rid  = OwnVst3Wrapper.GetRuntimeIdentifier(); // "osx-arm64", "win-x64", "linux-x64"
-string lib  = OwnVst3Wrapper.GetNativeLibraryName();  // "libownvst3.dylib", "ownvst3.dll", …
+string rid  = OwnVst3Wrapper.GetRuntimeIdentifier(); // "osx-arm64", "win-x64", "linux-x64", "ios-arm64", "iossimulator-arm64"
+string lib  = OwnVst3Wrapper.GetNativeLibraryName();  // "libownvst3.dylib", "ownvst3.dll", "ownvst3.framework/ownvst3", …
 string path = OwnVst3Wrapper.GetNativeLibraryPath();  // full path to the loaded native library
 ```
 
@@ -572,20 +591,25 @@ string path = OwnVst3Wrapper.GetNativeLibraryPath();  // full path to the loaded
 
 ## Platform Support
 
-| Platform | Architecture | Window API | Notes |
+| Platform | Architecture | Formats | Editor |
 |---|---|---|---|
-| Windows | x64, x86 | Win32 (STA thread) | Full editor and audio support |
-| macOS | x64, ARM64 | Cocoa (main thread via GCD) | VST3 + AudioUnit. Requires `[STAThread]` or Avalonia dispatcher |
-| Linux | x64 | X11 (dedicated event thread) | Requires running X server; Wayland via XWayland |
+| Windows | x64, x86, ARM64 | VST3 | own window on a native STA thread, per-monitor DPI |
+| macOS 11+ | x64, ARM64 (universal) | VST3, AudioUnit | own window on the main thread, or embedded in your `NSView` (AU) |
+| Linux | x64, ARM64 | VST3 | own X11 window on a native event-loop thread; Wayland via XWayland |
+| iOS / iPadOS 15+ | device ARM64, simulator ARM64 / x64 | AudioUnit (AUv3) | embedded in your `UIView` |
+
+On iOS the package adds `ownvst3.xcframework` to the app through a `buildTransitive` targets file —
+nothing to configure in a `net10.0-ios` project. Third-party AUv3 run out of process there.
 
 ### Native library search order
 
-The library is searched in this order at runtime:
+On the desktop these folders are tried in order — the assembly's directory, `AppContext.BaseDirectory`
+(single-file builds), the `.app` bundle's `Frameworks` folder on macOS, then the current directory —
+and in each of them `runtimes/{rid}/native/`, `runtimes/osx/native/` (macOS universal) and the folder
+itself.
 
-1. `runtimes/{rid}/native/` relative to the assembly location
-2. `runtimes/{rid}/native/` relative to the current directory
-3. Assembly directory (flat layout)
-4. Current directory (flat layout)
+On iOS the framework sits in the app's `Frameworks/ownvst3.framework/`; failing that it is loaded
+through the app's `@rpath`.
 
 ---
 
@@ -605,7 +629,7 @@ The library is searched in this order at runtime:
 
 | Method | Returns | Description |
 |---|---|---|
-| `LoadPluginAsync(path)` | `Task<bool>` | Load the plugin binary and create the factory. Sets state to `Loaded` or `Error`. Accepts a `.vst3` path, and on macOS a `.component` path or `AudioUnit:` identifier. |
+| `LoadPluginAsync(path)` | `Task<bool>` | Load the plugin binary and create the factory. Sets state to `Loaded` or `Error`. Accepts a `.vst3` path (desktop), and on macOS / iOS an `AudioUnit:` identifier (macOS also a `.component` path). |
 | `LoadPluginAsync(descriptor)` | `Task<bool>` | Same, from a `PluginDescriptor` returned by `PluginScanner`. |
 | `LoadPluginAtAsync(path, subIndex)` | `Task<bool>` | Picks one plugin out of a multi-plugin bundle; `subIndex: 0` equals `LoadPluginAsync(path)`. |
 | `InitializeAsync(sampleRate, maxBlockSize)` | `Task<bool>` | Start the audio engine. Sets state to `Ready` or `Error`. |
@@ -638,6 +662,7 @@ The library is searched in this order at runtime:
 | `SetTempo(bpm)` | ~1 block |
 | `SetTransportState(isPlaying)` | ~1 block |
 | `ResetTransportPosition()` | ~1 block |
+| `SetBypass(bypassed)` | next block; through the plugin's bypass parameter, or a latency-aligned dry path |
 
 #### Audio thread direct calls
 
@@ -646,6 +671,14 @@ The library is searched in this order at runtime:
 | `ProcessAudio(inputs, outputs, numChannels, numSamples)` | `bool` | Only valid when `IsReady`. Transitions state Ready↔Processing. |
 | `SendMidiEvent(status, data1, data2)` | `bool` | Zero latency, no queue. |
 | `ProcessMidi(MidiEvent[])` | `bool` | Zero latency, no queue. |
+
+#### Editor in your own view (UI thread)
+
+| Method | Returns | Notes |
+|---|---|---|
+| `HasEditorAsync()` | `Task<bool>` | Whether the plugin has a UI at all. |
+| `AttachEditorToView(view)` | `bool` | `UIView` (iOS) / `NSView` (macOS) handle; AudioUnits only. False with no editor or an older native library. |
+| `DetachEditor()` | — | Takes the plugin view back out; safe to repeat. |
 
 ---
 

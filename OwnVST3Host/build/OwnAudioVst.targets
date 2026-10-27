@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- ownvst3 ships as a dynamic framework: the managed side looks its exports up by name,
+       which a stripped static archive linked into the app would not survive. -->
+  <ItemGroup Condition="'$(TargetPlatformIdentifier)' == 'ios'">
+    <NativeReference Include="$(MSBuildThisFileDirectory)../../runtimes/ios/native/ownvst3.xcframework">
+      <Kind>Framework</Kind>
+      <SmartLink>False</SmartLink>
+      <Frameworks>AudioToolbox AVFoundation CoreAudioKit Foundation UIKit</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+</Project>

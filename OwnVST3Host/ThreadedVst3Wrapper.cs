@@ -334,6 +334,11 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     /// </summary>
     public bool IsEditorOpen => _inner.IsEditorOpen;
 
+    /// <summary>Editor inside an app-owned UIView / NSView, see <see cref="OwnVst3Wrapper.AttachEditorToView"/>. UI thread.</summary>
+    public bool AttachEditorToView(IntPtr view) => _inner.AttachEditorToView(view);
+
+    public void DetachEditor() => _inner.DetachEditor();
+
     #endregion
 
     #region Internal

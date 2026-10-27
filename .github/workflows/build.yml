@@ -242,11 +242,70 @@ jobs:
           retention-days: 30
 
   # ============================================================
+  # iOS: AudioUnits only, ownvst3.xcframework (device + simulator),
+  # smoke-tested in a simulator
+  # ============================================================
+  build-ios:
+    runs-on: macos-latest
+    name: Native – ios
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache dependency sources
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: src-pugixml-1.15-ios
+
+      - name: Fetch dependency sources
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: git clone --depth 1 --branch v1.15 https://github.com/zeux/pugixml.git .deps/pugixml
+
+      - name: Build frameworks
+        run: |
+          for slice in "device iphoneos arm64" "simulator iphonesimulator arm64;x86_64"; do
+            set -- $slice
+            cmake -S OwnVST3Native -B "OwnVST3Native/build-ios-$1" -G Ninja \
+              -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=$2 "-DCMAKE_OSX_ARCHITECTURES=$3" \
+              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+              -DFETCHCONTENT_SOURCE_DIR_PUGIXML="$PWD/.deps/pugixml"
+            cmake --build "OwnVST3Native/build-ios-$1"
+          done
+
+      - name: Create xcframework
+        run: |
+          mkdir -p artifacts/ios
+          xcodebuild -create-xcframework \
+            -framework OwnVST3Native/build-ios-device/ownvst3.framework \
+            -framework OwnVST3Native/build-ios-simulator/ownvst3.framework \
+            -output artifacts/ios/ownvst3.xcframework
+
+      - name: Check binary is JUCE-free
+        run: |
+          if grep -a -i -q -r juce artifacts/ios/ownvst3.xcframework; then
+            echo "::error::JUCE found in ownvst3.xcframework"
+            exit 1
+          fi
+
+      - name: iOS simulator smoke test
+        run: OwnVST3Native/tests/run-ios-smoke.sh artifacts/ios/ownvst3.xcframework
+
+      - name: Upload native library
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ios
+          path: artifacts/ios/
+          retention-days: 30
+
+  # ============================================================
   # Commit built libraries back into the repository
   # ============================================================
   update-native-libs:
     if: github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]')
-    needs: build-native
+    needs: [build-native, build-ios]
     runs-on: ubuntu-latest
     name: Update Native Libraries
     permissions:
@@ -298,6 +357,12 @@ jobs:
           path: runtimes/linux-arm64/native/
         continue-on-error: true
 
+      - name: Download iOS
+        uses: actions/download-artifact@v4
+        with:
+          name: native-ios
+          path: runtimes/ios/native/
+
       - name: Replicate macOS universal to per-arch folders
         run: |
           mkdir -p runtimes/osx-x64/native runtimes/osx-arm64/native
@@ -320,8 +385,8 @@ jobs:
   # Build the C# project and pack the NuGet package
   # ============================================================
   build-csharp:
-    needs: [build-native, update-native-libs]
-    if: always() && needs.build-native.result == 'success'
+    needs: [build-native, build-ios, update-native-libs]
+    if: always() && needs.build-native.result == 'success' && needs.build-ios.result == 'success'
     runs-on: ubuntu-latest
     name: C# Build & Package
 
@@ -382,6 +447,12 @@ jobs:
           path: runtimes/linux-arm64/native/
         continue-on-error: true
 
+      - name: Download iOS
+        uses: actions/download-artifact@v4
+        with:
+          name: native-ios
+          path: runtimes/ios/native/
+
       - name: Replicate macOS universal to per-arch folders
         run: |
           mkdir -p runtimes/osx-x64/native runtimes/osx-arm64/native
@@ -414,7 +485,7 @@ jobs:
   # ============================================================
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-native, build-csharp]
+    needs: [build-native, build-ios, build-csharp]
     runs-on: ubuntu-latest
     name: Create Release
 
