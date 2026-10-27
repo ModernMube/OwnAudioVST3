@@ -266,6 +266,18 @@ OWNVST3_API bool VST3Plugin_IsEditorOpen(VST3PluginHandle handle)
     return static_cast<PluginInstance*>(handle)->isEditorOpen();
 }
 
+OWNVST3_API bool OwnPlugin_AttachEditorToView(VST3PluginHandle handle, void* view)
+{
+    if (!handle || !view) return false;
+    return static_cast<PluginInstance*>(handle)->attachEditor(view);
+}
+
+OWNVST3_API void OwnPlugin_DetachEditor(VST3PluginHandle handle)
+{
+    if (handle)
+        static_cast<PluginInstance*>(handle)->detachEditor();
+}
+
 OWNVST3_API void VST3Plugin_ProcessIdle(VST3PluginHandle handle)
 {
     (void)handle;

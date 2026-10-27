@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace OwnVST3Host
@@ -20,6 +21,7 @@ namespace OwnVST3Host
         private const string WindowsLibraryName = "ownvst3.dll";
         private const string LinuxLibraryName = "libownvst3.so";
         private const string MacOSLibraryName = "libownvst3.dylib";
+        private const string IOSLibraryName = "ownvst3.framework/ownvst3";
 
         // Planar scratch the plugin reads and writes, off the GC heap entirely. Pinning
         // the caller's float[] per block used to cost two GC handles per channel per
@@ -78,7 +80,9 @@ namespace OwnVST3Host
         public static string GetRuntimeIdentifier()
         {
             string os;
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            if (OperatingSystem.IsIOS())
+                os = _onSimulator ? "iossimulator" : "ios";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 os = "win";
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 os = "linux";
@@ -105,6 +109,8 @@ namespace OwnVST3Host
         /// <returns>Library filename</returns>
         public static string GetNativeLibraryName()
         {
+            if (OperatingSystem.IsIOS())
+                return IOSLibraryName;
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 return WindowsLibraryName;
             else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
@@ -122,6 +128,8 @@ namespace OwnVST3Host
         /// </summary>
         public static string GetNativeLibraryPath()
         {
+            if (OperatingSystem.IsIOS()) return _iosLibraryPath();
+
             string rid = GetRuntimeIdentifier();
             string libraryName = GetNativeLibraryName();
 
@@ -141,6 +149,18 @@ namespace OwnVST3Host
                 $"Runtime identifier: {rid}\n" +
                 $"Searched paths:\n - {string.Join("\n - ", _paths)}");
         }
+
+        // The OwnAudioVst targets embed ownvst3.xcframework, so it sits in the app's Frameworks folder
+        private static string _iosLibraryPath()
+        {
+            string _embedded = Path.Combine(AppContext.BaseDirectory, "Frameworks", "ownvst3.framework", "ownvst3");
+            if (File.Exists(_embedded)) return _embedded;
+
+            //dyld resolves this through the app's own rpath
+            return "@rpath/" + IOSLibraryName;
+        }
+
+        private static bool _onSimulator => Environment.GetEnvironmentVariable("SIMULATOR_DEVICE_NAME") != null;
 
         private static IEnumerable<string> _libraryFolders()
         {
@@ -338,19 +358,16 @@ namespace OwnVST3Host
         [DllImport("libSystem.B.dylib")]
         private static extern int pthread_main_np();
 
-        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-        private delegate void DispatchWorkFunc(IntPtr context);
-
-        // Static pinned delegate — lives for the process lifetime.
-        private static readonly DispatchWorkFunc s_drainSignal = DrainSignalCallback;
-        private static readonly IntPtr s_drainSignalPtr =
-            Marshal.GetFunctionPointerForDelegate(s_drainSignal);
+        // A plain function pointer, not a marshalled delegate: iOS runs AOT-only and cannot
+        // build the native-to-managed thunk a delegate needs at run time.
+        private static readonly IntPtr s_drainSignalPtr = (IntPtr)(delegate* unmanaged[Cdecl]<IntPtr, void>)&DrainSignalCallback;
 
         private sealed class DrainContext
         {
             public readonly SemaphoreSlim Done = new SemaphoreSlim(0, 1);
         }
 
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
         private static void DrainSignalCallback(IntPtr ctxPtr)
         {
             var gcHandle = GCHandle.FromIntPtr(ctxPtr);

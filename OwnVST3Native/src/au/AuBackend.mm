@@ -5,10 +5,21 @@
 #include "ui/EditorWindow.h"
 #include "ui/UiThread.h"
 
+#include <TargetConditionals.h>
+
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
-#import <Cocoa/Cocoa.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+
+#if TARGET_OS_OSX
+#import <Cocoa/Cocoa.h>
+using PlatformViewController = NSViewController;
+using PlatformView           = NSView;
+#else
+#import <UIKit/UIKit.h>
+using PlatformViewController = UIViewController;
+using PlatformView           = UIView;
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -18,6 +29,13 @@
 
 namespace
 {
+#if TARGET_OS_OSX
+    constexpr AudioComponentInstantiationOptions kInstantiation = kAudioComponentInstantiation_LoadInProcess;
+#else
+    // third-party AUv3 on iOS only ever run out of process
+    constexpr AudioComponentInstantiationOptions kInstantiation = 0;
+#endif
+
     struct HostTime
     {
         double  sampleRate = 44100.0;
@@ -64,7 +82,7 @@ namespace
             AUAudioUnit* au = nil;
             UiThread::call([&] {
                 au = [[AUAudioUnit alloc] initWithComponentDescription:desc
-                                                               options:kAudioComponentInstantiation_LoadInProcess
+                                                               options:kInstantiation
                                                                  error:nil];
             });
             return au;
@@ -76,7 +94,7 @@ namespace
 
         auto start = [box, done, desc] {
             [AUAudioUnit instantiateWithComponentDescription:desc
-                                                     options:kAudioComponentInstantiation_LoadInProcess
+                                                     options:kInstantiation
                                            completionHandler:^(AUAudioUnit* au, NSError*) {
                 box->au = au;
                 dispatch_semaphore_signal(done);
@@ -129,8 +147,13 @@ namespace
                 self->readBuses();
                 self->readParameters();
 
+#if TARGET_OS_OSX
                 if (@available(macOS 13.0, *)) self->_hasEditor = true;
                 else                           self->_hasEditor = self->_au.providesUserInterface;
+#else
+                // Apple's built-in (v2 bridged) units claim a UI on iOS and then hand over none
+                self->_hasEditor = self->_au.providesUserInterface && self->_v2 == nullptr;
+#endif
             });
 
             return self;
@@ -141,6 +164,7 @@ namespace
             *_alive = false;
             UiThread::call([this] {
                 closeEditorOnUi();
+                detachOnUi();
                 if (_allocated) [_au deallocateRenderResources];
                 _au = nil;
             });
@@ -316,11 +340,17 @@ namespace
 
         bool openEditor(void* owner) override
         {
+#if TARGET_OS_OSX
             if (!UiThread::available()) return false;
 
             bool ok = false;
             UiThread::call([&] { ok = openEditorOnUi(owner); });
             return ok;
+#else
+            // no top-level windows of our own on iOS: OwnPlugin_AttachEditorToView
+            (void)owner;
+            return false;
+#endif
         }
 
         void closeEditor() override
@@ -330,21 +360,66 @@ namespace
 
         void resizeEditor(int width, int height) override
         {
+#if TARGET_OS_OSX
             UiThread::call([&] { if (_window) _window->setContentSize(width, height); });
+#else
+            (void)width; (void)height;
+#endif
         }
 
         bool editorSize(int& width, int& height) override
         {
             bool ok = false;
             UiThread::call([&] {
-                if (!_window) return;
-                _window->contentSize(width, height);
+#if TARGET_OS_OSX
+                if (_window)
+                {
+                    _window->contentSize(width, height);
+                    ok = width > 0 && height > 0;
+                    return;
+                }
+#endif
+                if (!_embedded) return;
+                const CGSize size = _embedded.view.bounds.size;
+                width  = static_cast<int>(size.width);
+                height = static_cast<int>(size.height);
                 ok = width > 0 && height > 0;
             });
             return ok;
         }
 
-        bool isEditorOpen() const override { return _editorOpen.load(std::memory_order_acquire); }
+        bool isEditorOpen() const override
+        {
+            return _editorOpen.load(std::memory_order_acquire) || _attached.load(std::memory_order_acquire);
+        }
+
+        bool attachEditor(void* parentView) override
+        {
+            if (!parentView || !_hasEditor || !UiThread::available()) return false;
+
+            UiThread::call([&] {
+                detachOnUi();
+
+                _embedParent = (__bridge PlatformView*)parentView;
+                _attached.store(true, std::memory_order_release);
+
+                auto alive = _alive;
+                const uint64_t generation = ++_embedGeneration;
+                [_au requestViewControllerWithCompletionHandler:^(AUViewControllerBase* vc) {
+                    auto embed = [this, alive, generation, vc] {
+                        if (*alive && generation == _embedGeneration) embedInto(vc);
+                    };
+                    if (pthread_main_np()) embed();
+                    else                   UiThread::post(embed);
+                }];
+            });
+            return true;
+        }
+
+        void detachEditor() override
+        {
+            UiThread::call([this] { detachOnUi(); });
+        }
 
         bool getState(std::vector<uint8_t>& out) override
         {
@@ -465,7 +540,9 @@ namespace
             _mins.clear();
             _maxs.clear();
 
-            _v2 = [_au isKindOfClass:[AUAudioUnitV2Bridge class]] ? ((AUAudioUnitV2Bridge*)_au).audioUnit : nullptr;
+            _v2 = nullptr;
+            if (@available(macOS 11.0, iOS 14.0, *))
+                if ([_au isKindOfClass:[AUAudioUnitV2Bridge class]]) _v2 = ((AUAudioUnitV2Bridge*)_au).audioUnit;
 
             for (AUParameter* p in _params)
             {
@@ -561,6 +638,48 @@ namespace
             };
         }
 
+        PlatformViewController* withFallback(PlatformViewController* vc)
+        {
+#if TARGET_OS_OSX
+            if (!vc)
+            {
+                if (@available(macOS 13.0, *))
+                {
+                    AUGenericViewController* generic = [[AUGenericViewController alloc] init];
+                    generic.auAudioUnit = _au;
+                    vc = generic;
+                }
+            }
+#endif
+            return vc;
+        }
+
+        void embedInto(PlatformViewController* vc)
+        {
+            vc = withFallback(vc);
+            if (!vc || !_embedParent) { detachOnUi(); return; }
+
+            _embedded = vc;
+            PlatformView* view = vc.view;
+            view.frame = _embedParent.bounds;
+#if TARGET_OS_OSX
+            view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+#else
+            view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+#endif
+            [_embedParent addSubview:view];
+        }
+
+        void detachOnUi()
+        {
+            ++_embedGeneration;
+            _attached.store(false, std::memory_order_release);
+            if (_embedded) [_embedded.view removeFromSuperview];
+            _embedded    = nil;
+            _embedParent = nil;
+        }
+
+#if TARGET_OS_OSX
         bool openEditorOnUi(void* owner)
         {
             if (_window) { _window->show(); return true; }
@@ -592,15 +711,7 @@ namespace
         {
             if (!_window) return;
 
-            if (!vc)
-            {
-                if (@available(macOS 13.0, *))
-                {
-                    AUGenericViewController* generic = [[AUGenericViewController alloc] init];
-                    generic.auAudioUnit = _au;
-                    vc = generic;
-                }
-            }
+            vc = withFallback(vc);
             if (!vc) { closeEditorOnUi(); return; }
 
             _viewController = vc;
@@ -629,6 +740,9 @@ namespace
             _viewController = nil;
             _window.reset();
         }
+#else
+        void closeEditorOnUi() {}
+#endif
 
         AUAudioUnit* _au = nil;
         std::string  _identifier;
@@ -660,10 +774,17 @@ namespace
         std::vector<float*>        _inPtrs, _outPtrs;
         std::vector<std::vector<uint8_t>> _outLists;
 
+#if TARGET_OS_OSX
         std::unique_ptr<EditorWindow>      _window;
         NSViewController*                  _viewController = nil;
+#endif
         std::atomic<bool>                  _editorOpen { false };
         uint64_t                           _editorGeneration = 0;
+
+        PlatformViewController*            _embedded    = nil;
+        PlatformView*                      _embedParent = nil;
+        std::atomic<bool>                  _attached { false };
+        uint64_t                           _embedGeneration = 0;
         std::shared_ptr<std::atomic<bool>> _alive = std::make_shared<std::atomic<bool>>(true);
     };
 }

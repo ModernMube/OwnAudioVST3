@@ -293,6 +293,17 @@ bool PluginInstance::isEditorOpen() const
     return _backend && _backend->isEditorOpen();
 }
 
+bool PluginInstance::attachEditor(void* parentView)
+{
+    if (_disposed.load(std::memory_order_relaxed) || !_backend || !_backend->hasEditor()) return false;
+    return _backend->attachEditor(parentView);
+}
+
+void PluginInstance::detachEditor()
+{
+    if (_backend) _backend->detachEditor();
+}
+
 bool PluginInstance::getState(uint8_t** outData, int* outLength)
 {
     if (!_backend || !outData || !outLength) return false;

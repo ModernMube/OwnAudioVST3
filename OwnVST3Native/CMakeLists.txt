@@ -1,7 +1,16 @@
 cmake_minimum_required(VERSION 3.22)
 
+# iOS: -DCMAKE_SYSTEM_NAME=iOS. AudioUnits only (no VST3 on iOS), built as ownvst3.framework.
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(OWNVST3_IOS ON)
+endif()
+
 if(NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS deployment target")
+    if(OWNVST3_IOS)
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "iOS deployment target")
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "macOS deployment target")
+    endif()
 endif()
 
 project(ownvst3
@@ -27,22 +36,25 @@ option(OWNVST3_BUILD_TESTS "Build the native unit tests" OFF)
 # Point FETCHCONTENT_SOURCE_DIR_VST3SDK / _PUGIXML at local checkouts to build offline.
 include(FetchContent)
 
-FetchContent_Declare(vst3sdk
-    GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
-    GIT_TAG        v3.8.1_build_84
-    GIT_SHALLOW    TRUE
-    GIT_SUBMODULES base pluginterfaces public.sdk cmake
-    SOURCE_SUBDIR  do-not-add
-)
+if(NOT OWNVST3_IOS)
+    FetchContent_Declare(vst3sdk
+        GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+        GIT_TAG        v3.8.1_build_84
+        GIT_SHALLOW    TRUE
+        GIT_SUBMODULES base pluginterfaces public.sdk cmake
+        SOURCE_SUBDIR  do-not-add
+    )
+    FetchContent_MakeAvailable(vst3sdk)
+    include(cmake/Vst3Sdk.cmake)
+endif()
+
 FetchContent_Declare(pugixml
     GIT_REPOSITORY https://github.com/zeux/pugixml.git
     GIT_TAG        v1.15
     GIT_SHALLOW    TRUE
     SOURCE_SUBDIR  do-not-add
 )
-FetchContent_MakeAvailable(vst3sdk pugixml)
-
-include(cmake/Vst3Sdk.cmake)
+FetchContent_MakeAvailable(pugixml)
 
 # ─── Portable core (no SDK, no OS UI) – shared with the unit tests ────────────
 
@@ -62,17 +74,56 @@ add_library(ownvst3 SHARED
     src/Exports.cpp
     src/core/PluginInstance.cpp
     src/core/BackendFactory.cpp
-    src/vst3/Vst3Backend.cpp
-    src/vst3/HostContext.cpp
-    src/vst3/MidiToVst.cpp
     src/scan/Scanner.cpp
-    src/scan/Vst3ModuleInfo.cpp
     src/au/AudioUnitRegistry.cpp
 )
 target_include_directories(ownvst3 PRIVATE include src)
-target_link_libraries(ownvst3 PRIVATE ownvst3_core ownvst3_vst3sdk)
+target_link_libraries(ownvst3 PRIVATE ownvst3_core)
 
-if(WIN32)
+if(NOT OWNVST3_IOS)
+    target_sources(ownvst3 PRIVATE
+        src/vst3/Vst3Backend.cpp
+        src/vst3/HostContext.cpp
+        src/vst3/MidiToVst.cpp
+        src/scan/Vst3ModuleInfo.cpp
+    )
+    target_link_libraries(ownvst3 PRIVATE ownvst3_vst3sdk)
+endif()
+
+if(OWNVST3_IOS)
+    # A dynamic framework: the C# side looks exports up by name, which a stripped
+    # static archive linked into the app would not survive.
+    target_sources(ownvst3 PRIVATE
+        src/ui/mac/UiThreadMac.mm
+        src/au/AuBackend.mm
+    )
+    set_source_files_properties(src/ui/mac/UiThreadMac.mm src/au/AuBackend.mm
+        PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_compile_definitions(ownvst3 PRIVATE OWNVST3_NO_VST3)
+    # App Store validation wants MinimumOSVersion and the platform in an embedded framework.
+    if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+        set(OWNVST3_IOS_PLATFORM "iPhoneSimulator")
+    else()
+        set(OWNVST3_IOS_PLATFORM "iPhoneOS")
+    endif()
+    configure_file(cmake/iOSFramework.plist.in ${CMAKE_CURRENT_BINARY_DIR}/ownvst3-Info.plist @ONLY)
+
+    set_target_properties(ownvst3 PROPERTIES
+        FRAMEWORK                   TRUE
+        OUTPUT_NAME                 "ownvst3"
+        MACOSX_FRAMEWORK_IDENTIFIER "com.modernmube.ownvst3"
+        MACOSX_FRAMEWORK_INFO_PLIST ${CMAKE_CURRENT_BINARY_DIR}/ownvst3-Info.plist
+    )
+    target_link_libraries(ownvst3 PRIVATE
+        "-framework UIKit"
+        "-framework CoreAudioKit"
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreFoundation"
+        "-framework Foundation"
+    )
+
+elseif(WIN32)
     target_sources(ownvst3 PRIVATE
         src/ui/win32/UiThreadWin.cpp
         src/ui/win32/EditorWindowWin.cpp
@@ -132,7 +183,7 @@ endif()
 
 # ─── Native unit tests ────────────────────────────────────────────────────────
 
-if(OWNVST3_BUILD_TESTS)
+if(OWNVST3_BUILD_TESTS AND NOT OWNVST3_IOS)
     enable_testing()
     add_executable(ownvst3_tests tests/NativeTests.cpp src/vst3/MidiToVst.cpp)
     target_link_libraries(ownvst3_tests PRIVATE ownvst3_core ownvst3_vst3sdk)

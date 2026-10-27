@@ -15,7 +15,7 @@ A thread-safe, cross-platform C# library for hosting VST3 plugins — and, on ma
 
 - **Thread-safe by design** — dedicated plugin thread, lock-free UI→audio parameter queue, atomic state machine
 - **Full VST3 support** — instruments, effects, MIDI-only plugins, parameter automation, transport context
-- **Audio Unit support on macOS** — AUv2 `.component` bundles alongside VST3, through the same API
+- **Audio Unit support on macOS and iOS** — AUv2 `.component` bundles and AUv3 extensions alongside VST3, through the same API; on iOS the plugin view goes into a `UIView` you own
 - **Sub-second plugin scanner** — finds VST3 bundles *and* registry-only AudioUnits without loading them; opt into a full scan when you need channel counts
 - **Cross-platform native editors** — the native library creates and owns the editor window: a dedicated STA thread with its own message loop on Windows, the main thread on macOS, an X11 event-loop thread on Linux
 - **Zero allocation audio path** — pre-pinned buffers, no heap allocation inside `ProcessAudio`
@@ -112,6 +112,31 @@ PluginScanner.RestoreCache(File.ReadAllText(cacheFile));
 
 ---
 
+## iOS (AUv3)
+
+The package carries `ownvst3.xcframework` (device and simulator) and a `buildTransitive` targets file that embeds it into any `net10.0-ios` app — nothing to configure. VST3 does not exist on iOS; AudioUnits, including third-party AUv3 extensions, work exactly as on macOS:
+
+```csharp
+IReadOnlyList<PluginDescriptor> units = await PluginScanner.ScanAsync(PluginFormat.AudioUnit);
+
+using var plugin = new ThreadedVst3Wrapper();
+await plugin.LoadPluginAsync(units.First(u => u.Name == "AUDelay"));
+await plugin.InitializeAsync(48000, 256);
+```
+
+There are no top-level editor windows on iOS, so `CreateEditor` returns false. Hand the plugin a view of your own instead (for example the native view behind an Avalonia `NativeControlHost`), on the UI thread:
+
+```csharp
+if (await plugin.HasEditorAsync())
+    plugin.AttachEditorToView(myUIView.Handle);   // the plugin view fills it, a moment later
+// ...
+plugin.DetachEditor();
+```
+
+`AttachEditorToView` / `DetachEditor` work on macOS with an `NSView` too. Apple's built-in units have no view on iOS (`HasEditor` is false for them); third-party AUv3 run out of process, as iOS requires.
+
+---
+
 ## Threading Model
 
 ```
@@ -146,6 +171,7 @@ plugin.ProcessAudio(inputs, outputs, channels, samples);
 | Windows | x64, x86, ARM64 | VST3 | native STA thread + message loop, per-monitor DPI |
 | macOS | x64, ARM64 | VST3, AudioUnit | main thread (GCD), never blocked |
 | Linux | x64, ARM64 | VST3 | native X11 event-loop thread with `Linux::IRunLoop` |
+| iOS / iPadOS 15+ | device ARM64, simulator ARM64 / x64 | AudioUnit (AUv3) | main thread; the editor is embedded in your own `UIView` |
 
 Native libraries are resolved automatically from `runtimes/{rid}/native/` at runtime.
 

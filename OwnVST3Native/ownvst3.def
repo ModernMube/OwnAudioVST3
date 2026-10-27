@@ -50,3 +50,5 @@ EXPORTS
     OwnPlugin_LoadPluginAt
     OwnPlugin_GetFormatName
     OwnPlugin_GetIdentifier
+    OwnPlugin_AttachEditorToView
+    OwnPlugin_DetachEditor
