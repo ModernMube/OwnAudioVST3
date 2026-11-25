@@ -9,7 +9,7 @@
     <!-- NuGet packaging information -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>OwnAudioVst</PackageId>
-    <Version>2.1.0</Version>
+    <Version>2.1.1</Version>
     <Authors>Modern Mube</Authors>
     <Company>Modern Musician</Company>
     <Description>C# host for VST3 plugins (Windows, macOS, Linux) and AudioUnits (macOS, iOS) on an MIT-licensed native core built on the Steinberg VST 3 SDK. Background plugin scanner, native editor windows on the desktop, plugin views embedded in your own UIView on iOS.</Description>

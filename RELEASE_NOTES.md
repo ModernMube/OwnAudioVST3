@@ -1,3 +1,8 @@
+## OwnAudioVst 2.1.1
+
+### What's new
+- `ProcessMidi(ReadOnlySpan<MidiEvent>)` on `OwnVst3Wrapper` and `ThreadedVst3Wrapper`: a host can hand over the first n events of a buffer it keeps, instead of an array exactly as long as the batch. The array overload stays and calls the span one.
+
 ## OwnAudioVst 2.1.0 – iOS (AUv3) support
 
 ### What's new

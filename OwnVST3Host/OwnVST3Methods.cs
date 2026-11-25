@@ -276,11 +276,16 @@ namespace OwnVST3Host
         /// Processes MIDI events. Marshalled through stack scratch in chunks — this runs on
         /// the audio thread and a per-call array was straight gen0 churn.
         /// </summary>
-        public unsafe bool ProcessMidi(MidiEvent[] events)
+        public bool ProcessMidi(MidiEvent[] events) => ProcessMidi(events.AsSpan());
+
+        /// <summary>
+        /// Same, for the first n events of a buffer the caller keeps — no exact-length array needed.
+        /// </summary>
+        public unsafe bool ProcessMidi(ReadOnlySpan<MidiEvent> events)
         {
             CheckDisposed();
 
-            if (events == null || events.Length == 0)
+            if (events.IsEmpty)
                 return false;
 
             const int _chunk = 128;

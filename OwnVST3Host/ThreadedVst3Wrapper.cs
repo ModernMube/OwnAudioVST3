@@ -319,6 +319,9 @@ public sealed class ThreadedVst3Wrapper : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool ProcessMidi(MidiEvent[] events) => _inner.ProcessMidi(events);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool ProcessMidi(ReadOnlySpan<MidiEvent> events) => _inner.ProcessMidi(events);
+
     #endregion
 
     #region Editor / idle these must stay on the caller thread (see VstEditorController).
