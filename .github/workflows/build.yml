@@ -232,11 +232,12 @@ jobs:
       # ── C# API tests: exports, golden files, VST3 / AU behaviour, scanner ─
       - name: API tests
         if: matrix.api_tests
+        timeout-minutes: 10
         shell: bash
         env:
           OWNVST3_NATIVE_LIB: ${{ github.workspace }}/artifacts/${{ matrix.rid }}/${{ matrix.lib_name }}
           OWNVST3_TEST_PLUGINS: ${{ github.workspace }}/OwnVST3Native/build-plugins/VST3/${{ env.BUILD_TYPE }}
-        run: dotnet test OwnVST3Tests/OwnVST3Tests.csproj --configuration Release --logger "console;verbosity=normal"
+        run: dotnet test OwnVST3Tests/OwnVST3Tests.csproj --configuration Release --logger "console;verbosity=normal" --blame-hang --blame-hang-timeout 3m
 
       - name: Upload native library
         uses: actions/upload-artifact@v4
