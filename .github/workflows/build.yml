@@ -109,6 +109,8 @@ jobs:
             "$CODENAME" | sudo tee    /etc/apt/sources.list.d/arm64.list
           printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports %s-updates main restricted universe\n' \
             "$CODENAME" | sudo tee -a /etc/apt/sources.list.d/arm64.list
+          printf 'deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports %s-security main restricted universe\n' \
+            "$CODENAME" | sudo tee -a /etc/apt/sources.list.d/arm64.list
           # Restrict ALL existing sources to amd64 (handles http:// and https://)
           # Traditional one-line format (sources.list and *.list files)
           sudo sed -i '/^deb / { /\[arch=/! s/^deb /deb [arch=amd64] / }' /etc/apt/sources.list
@@ -129,7 +131,9 @@ jobs:
           # Update: ignore 404 errors from sources that lack arm64 indices;
           # ports.ubuntu.com arm64 index is still fetched successfully.
           sudo apt-get update || true
-          sudo apt-get install -y libx11-dev:arm64
+          # The runner's gcc libs come from a PPA that has no arm64 build; Multi-Arch: same
+          # wants both halves on one version, so the amd64 side steps back to Ubuntu's.
+          sudo apt-get install -y --allow-downgrades libx11-dev:arm64
 
       # ── Dependency sources (VST3 SDK + pugixml), cached outside the build tree ─
       # Only sources are cached: a FetchContent build tree carries the generator
